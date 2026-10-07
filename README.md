@@ -89,20 +89,23 @@ x = np.linspace(0, 10, 100)
 result = formula(x)
 ```
 
-The convenience helper `latex_to_code` accepts the same generation options as the main transpiler
-while keeping support for legacy macro overrides such as `custom_symbol_map`:
+The convenience helper `latex_to_code` accepts the same keyword-only generation options as the
+main transpiler. Use `variable_map` to rename parsed symbols:
 
 ```python
 from latex2code import latex_to_code
 
 code = latex_to_code(
     r"\theta + \lambda",
-    custom_symbol_map={r"\lambda": "lambda_value"},
     function_name="signal_model",
     type_hints=False,
+    variable_map={"lambda": "lambda_value"},
 )
 print(code)
 ```
+
+The legacy `custom_symbol_map` and `use_numpy` Python arguments are deprecated. Use
+`variable_map` and `backend="numpy"` instead.
 
 Choose a backend just as with `transpile_latex`; optional frameworks must be installed when
 compiling a formula for that backend. The callable uses only the arguments supplied by the caller
@@ -117,7 +120,14 @@ code = transpile_latex(r"\sin(\pi x) + e + \theta", function_name="signal_respon
 print(code)
 ```
 
-Standard constants `\pi` and `e` are emitted as numeric constants and are not function arguments. Other Greek-letter symbols such as `\theta` remain variables and appear in the generated function signature.
+Standard constants `\pi` and `e` are emitted as numeric constants by default. Other Greek-letter
+symbols such as `\theta` remain variables and appear in the generated function signature. Pass a
+`constants` mapping to customize substitutions; for example, `constants={"pi": math.pi}` leaves
+`e` as a function argument. Use `args=["x", "w", "b"]` to explicitly set argument order; the
+default follows each variable's first appearance in the input.
+
+Text wrappers preserve their contents: `\mathrm{e}^x` retains the `e`, and `\text{...}` is not
+removed as if it were whitespace.
 
 ### Inspecting a Transpilation
 
@@ -210,7 +220,7 @@ from latex2code import transpile_latex
 code = transpile_latex(
     r"\operatorname{sigmoid}(x)",
     function_name="logistic_probability",
-    use_numpy=True,
+    backend="numpy",
 )
 print(code)
 ```
@@ -323,7 +333,7 @@ latex2code "\frac{a}{b}" --name divide
 You can also pipe input from standard input:
 
 ```powershell
-"\sin(x) + \cos(y)" | latex2code - --name signal
+echo '\sin(x) + \cos(y)' | latex2code - --name signal
 ```
 
 Write the generated source directly to a Python file with `--output`:
@@ -339,9 +349,8 @@ latex2code "\sin(x)^2 + x" --backend torch --output differentiable.py
 latex2code "\sin(x)^2 + x" --backend jax --output differentiable.py
 ```
 
-`--numpy` remains available as a legacy alias for `--backend numpy`. Generated source for
-PyTorch/JAX imports the selected framework, so install that framework in the environment where the
-generated file will run.
+Generated source for PyTorch/JAX imports the selected framework, so install that framework in the
+environment where the generated file will run.
 Use `--inspect` to print a JSON report with the parsed expression, function variables, warnings, and source.
 Rename parsed symbols with repeatable `--map-variable SYMBOL=NAME` options:
 
@@ -364,7 +373,6 @@ latex2code --interactive --inspect --backend numpy
 | --- | --- | --- |
 | `-n` | `--name` | Name of the generated Python function (default: `formula`). |
 |  | `--no-types` | Disable type hints in the generated signature. |
-| `-p` | `--numpy` | Force generation with NumPy functions/arrays. |
 |  | `--backend` | Select `python`, `numpy`, `torch`, or `jax` output (default: `python`). |
 | `-o` | `--output` | Write generated Python source to a file instead of stdout. |
 |  | `--inspect` | Print JSON containing the parsed expression, variables, warnings, and generated source. |
@@ -412,7 +420,7 @@ to 32-bit floating point; enable and verify 64-bit mode in the application when 
 NumPy error/gamma functions can use Python `math` implementations wrapped for arrays, which may be
 slower than native array kernels.
 
-- Input is parsed strictly by SymPy's LaTeX parser plus a restricted safe fallback, so malformed trailing tokens are rejected rather than silently discarded. Document markup, arbitrary TeX macros, and arbitrary custom functions are outside scope.
+- Input is parsed strictly by SymPy's ANTLR-based LaTeX parser plus a restricted safe fallback, so malformed trailing tokens are rejected rather than silently discarded. Document markup, arbitrary TeX macros, and arbitrary custom functions are outside scope.
 - Presentation-only spacing commands such as `\quad`, `\qquad`, `\,`, `\hspace{...}`, and `\vspace{...}` are ignored. `\displaystyle` and related math-style commands are also ignored. Text wrappers and unknown macros are not stripped because they can carry mathematical meaning; remove or rewrite them explicitly if unsupported.
 - Function application and implicit multiplication follow the parser's documented grammar; no assumptions are made about custom function names or subscript semantics. Inspect the parsed expression/tree and explicitly rename variables instead of relying on guessed intent.
 - Unsupported commands and functions raise `UnsupportedLaTeXFeatureError`; close command/function spellings are suggested when possible. Malformed input raises `InvalidLaTeXSyntaxError`, which includes a source location and excerpt when identifiable, plus delimiter or environment hints when detected.
@@ -424,6 +432,7 @@ slower than native array kernels.
 - Finite products are symbolically evaluated when SymPy can reduce them; unresolved symbolic products raise `CodeGenerationError` rather than returning incomplete Python.
 - NumPy, PyTorch, and JAX operate elementwise where the framework supports the operation. Finite sums still use scalar iteration bounds.
 - Piecewise outputs use elementwise selection in array backends. Validate branch domains when an unselected branch could itself produce invalid values.
+- SymPy's current LaTeX grammar requires the `antlr4-python3-runtime` package (declared with a compatible version range); SymPy's Lark backend was evaluated but does not cover the expression grammar and constructs supported here.
 - Generated tensor code does not promise a particular device, dtype, or shape policy. Gamma has poles at non-positive integers; behavior at singularities and outside mathematical domains follows the selected backend.
 - Generated Python is not a mathematical proof or a guarantee of numerical stability. Review and test output before relying on it in research or production calculations.
 

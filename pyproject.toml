@@ -26,7 +26,7 @@ classifiers = [
 ]
 dependencies = [
     "sympy>=1.12",
-    "antlr4-python3-runtime==4.11.0",
+    "antlr4-python3-runtime>=4.11,<5",
     "numpy>=1.24.0",
 ]
 
@@ -37,7 +37,12 @@ Issues = "https://github.com/ThulioASB/latex2code/issues"
 
 [project.optional-dependencies]
 dev = [
+    "black>=24.0",
     "pytest>=7.0.0",
+    "pytest-cov>=5.0.0",
+    "hypothesis>=6.0.0",
+    "ruff>=0.6.0",
+    "mypy>=1.11.0",
     "build>=1.2.0",
 ]
 torch = ["torch>=2.0"]
@@ -51,3 +56,24 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-ra --cov=latex2code --cov-report=term-missing"
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[tool.setuptools.package-data]
+latex2code = ["py.typed"]

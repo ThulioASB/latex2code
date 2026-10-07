@@ -3,19 +3,15 @@ import json
 import sys
 from dataclasses import asdict
 from pathlib import Path
-from latex2code import __version__
-from latex2code.core import LaTeXTranspilerError, inspect_latex, latex_to_code, transpile_latex
 
-def interactive_mode():
-  print("LaTeX2Code Interactive Mode (type 'exit' to quit)")
-  while True:
-    try:
-      user_input = input("LaTeX > ")
-      if user_input.strip().lower() in ("exit", "quit"):
-        break
-      print("Python >", latex_to_code(user_input))
-    except Exception as e:
-      print(f"Error: {e}", file=sys.stderr)
+from latex2code import __version__
+from latex2code.core import (
+    Backend,
+    LaTeXTranspilerError,
+    inspect_latex,
+    transpile_latex,
+)
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -45,15 +41,9 @@ def main():
         help="Disable type hints in the generated function definition",
     )
     parser.add_argument(
-        "-p",
-        "--numpy",
-        action="store_true",
-        help="Legacy alias for --backend numpy",
-    )
-    parser.add_argument(
         "--backend",
         choices=("python", "numpy", "torch", "jax"),
-        help="Generated code target (default: python, or numpy when --numpy is used)",
+        help="Generated code target (default: python)",
     )
     parser.add_argument(
         "-o",
@@ -82,7 +72,7 @@ def main():
     args = parser.parse_args()
 
     if args.latex is None and not args.interactive:
-        interactive_mode()
+        parser.print_help()
         return
     if args.interactive and args.latex is not None:
         parser.error("--interactive cannot be combined with a positional expression")
@@ -105,7 +95,6 @@ def main():
         _run_interactive(
             function_name=args.name,
             type_hints=not args.no_types,
-            use_numpy=args.numpy,
             backend=args.backend,
             inspect=args.inspect,
             variable_map=variable_map,
@@ -116,23 +105,28 @@ def main():
         latex_input = sys.stdin.read().strip()
 
     try:
-        transpile = inspect_latex if args.inspect else transpile_latex
-        result = transpile(
-            latex_input,
-            function_name=args.name,
-            type_hints=not args.no_types,
-            use_numpy=args.numpy,
-            backend=args.backend,
-            variable_map=variable_map,
-        )
         if args.inspect:
-            print(json.dumps(asdict(result), indent=2))
-        elif args.output:
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(result, encoding="utf-8")
+            details = inspect_latex(
+                latex_input,
+                function_name=args.name,
+                type_hints=not args.no_types,
+                backend=args.backend,
+                variable_map=variable_map,
+            )
+            print(json.dumps(asdict(details), indent=2))
         else:
-            print("\n# Generated Python Code:")
-            print(result)
+            source = transpile_latex(
+                latex_input,
+                function_name=args.name,
+                type_hints=not args.no_types,
+                backend=args.backend,
+                variable_map=variable_map,
+            )
+            if args.output:
+                args.output.parent.mkdir(parents=True, exist_ok=True)
+                args.output.write_text(source, encoding="utf-8")
+            else:
+                print(source)
     except LaTeXTranspilerError as err:
         print(f"\n[Error] {err}", file=sys.stderr)
         sys.exit(1)
@@ -148,8 +142,7 @@ def _run_interactive(
     *,
     function_name: str,
     type_hints: bool,
-    use_numpy: bool,
-    backend: str | None,
+    backend: Backend | None,
     inspect: bool,
     variable_map: dict[str, str],
 ) -> None:
@@ -161,9 +154,7 @@ def _run_interactive(
     multiline: list[str] | None = None
     while True:
         try:
-            expression = input(
-                "latex2code> " if multiline is None else "...> "
-            ).strip()
+            expression = input("latex2code> " if multiline is None else "...> ").strip()
         except EOFError:
             if multiline is not None:
                 print("Discarded unfinished multiline expression.", file=sys.stderr)
@@ -175,7 +166,6 @@ def _run_interactive(
                     "\n".join(multiline),
                     function_name=function_name,
                     type_hints=type_hints,
-                    use_numpy=use_numpy,
                     backend=backend,
                     inspect=inspect,
                     variable_map=variable_map,
@@ -198,7 +188,6 @@ def _run_interactive(
             expression,
             function_name=function_name,
             type_hints=type_hints,
-            use_numpy=use_numpy,
             backend=backend,
             inspect=inspect,
             variable_map=variable_map,
@@ -210,32 +199,29 @@ def _print_interactive_expression(
     *,
     function_name: str,
     type_hints: bool,
-    use_numpy: bool,
-    backend: str | None,
+    backend: Backend | None,
     inspect: bool,
     variable_map: dict[str, str],
 ) -> None:
     try:
         if inspect:
-            result = inspect_latex(
+            details = inspect_latex(
                 expression,
                 function_name=function_name,
                 type_hints=type_hints,
-                use_numpy=use_numpy,
                 backend=backend,
                 variable_map=variable_map,
             )
-            print(json.dumps(asdict(result), indent=2))
+            print(json.dumps(asdict(details), indent=2))
         else:
-            result = transpile_latex(
+            source = transpile_latex(
                 expression,
                 function_name=function_name,
                 type_hints=type_hints,
-                use_numpy=use_numpy,
                 backend=backend,
                 variable_map=variable_map,
             )
-            print(result, end="" if result.endswith("\n") else "\n")
+            print(source, end="" if source.endswith("\n") else "\n")
     except LaTeXTranspilerError as err:
         print(f"[Error] {err}", file=sys.stderr)
 

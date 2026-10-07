@@ -1,6 +1,9 @@
+from importlib.metadata import PackageNotFoundError, version
+
 from latex2code.core import (
-    CompiledFormula,
+    Backend,
     CodeGenerationError,
+    CompiledFormula,
     InvalidLaTeXSyntaxError,
     InvalidPythonIdentifierError,
     LaTeXTranspilerError,
@@ -13,9 +16,13 @@ from latex2code.core import (
     transpile_latex,
 )
 
-__version__ = "0.2.0"
+try:
+    __version__ = version("latex2code")
+except PackageNotFoundError:
+    __version__ = "0+unknown"
 __all__ = [
     "__version__",
+    "Backend",
     "transpile_latex",
     "compile_latex",
     "inspect_latex",
