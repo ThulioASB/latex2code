@@ -3,6 +3,7 @@ from io import StringIO
 import math
 import numpy as np
 import pytest
+from latex2code import core as core_module
 from latex2code import (
     __version__,
     compile_latex,
@@ -346,6 +347,17 @@ def test_backend_rejects_unknown_and_conflicting_options():
         transpile_latex("x", backend="tensorflow")
     with pytest.raises(LaTeXTranspilerError, match="conflicts"):
         transpile_latex("x", backend="torch", use_numpy=True)
+
+
+@pytest.mark.parametrize("backend", ["torch", "jax"])
+def test_optional_backends_can_generate_source_without_dependency(backend, monkeypatch):
+    monkeypatch.setattr(core_module.importlib.util, "find_spec", lambda name: None)
+
+    code = transpile_latex("x", backend=backend, type_hints=False)
+    assert "def formula(x):" in code
+
+    with pytest.raises(LaTeXTranspilerError, match=f"'{backend}' backend requires"):
+        compile_latex("x", backend=backend, type_hints=False)
 
 
 def test_torch_backend_matches_scalar_and_array_values_and_gradients():

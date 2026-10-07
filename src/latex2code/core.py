@@ -596,7 +596,7 @@ def _parse_cases_environment(latex_str: str) -> sp.Expr | None:
         if not pieces:
             return None
 
-        return sp.Piecewise(*pieces)
+        return sp.Piecewise(*pieces, evaluate=False)
     except InvalidLaTeXSyntaxError:
         raise
     except Exception as exc:
@@ -1035,17 +1035,6 @@ def _transpile_latex(
         raise LaTeXTranspilerError(
             "use_numpy=True conflicts with an explicit backend; use backend='numpy' instead."
         )
-    if backend == "torch" and importlib.util.find_spec("torch") is None:
-        raise LaTeXTranspilerError(
-            "The 'torch' backend requires the optional dependency 'torch'. "
-            "Install it with `pip install latex2code[torch]`."
-        )
-    if backend == "jax" and importlib.util.find_spec("jax") is None:
-        raise LaTeXTranspilerError(
-            "The 'jax' backend requires the optional dependency 'jax'. "
-            "Install it with `pip install latex2code[jax]`."
-        )
-
     normalized_latex = _normalize_latex_string(latex_str)
 
     # 1. Parse matrix, piecewise, or general expression
@@ -1288,6 +1277,17 @@ def compile_latex(
     variable_map: Mapping[str, str] | None = None,
 ) -> CompiledFormula:
     """Compile LaTeX into a callable and retain its generated source and metadata."""
+    selected_backend = backend or ("numpy" if use_numpy else "python")
+    if selected_backend == "torch" and importlib.util.find_spec("torch") is None:
+        raise LaTeXTranspilerError(
+            "The 'torch' backend requires the optional dependency 'torch'. "
+            "Install it with `pip install latex2code[torch]`."
+        )
+    if selected_backend == "jax" and importlib.util.find_spec("jax") is None:
+        raise LaTeXTranspilerError(
+            "The 'jax' backend requires the optional dependency 'jax'. "
+            "Install it with `pip install latex2code[jax]`."
+        )
     info = inspect_latex(
         latex_str,
         function_name=function_name,
