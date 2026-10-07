@@ -50,4 +50,4 @@ latex2code = "latex2code.cli:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["src/tests"]
+testpaths = ["tests"]
