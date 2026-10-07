@@ -1311,10 +1311,13 @@ def latex_to_code(
         r"\\(vspace|hspace|quad|qquad|textbf|mathrm|text)\{[^}]*\}", "", latex_str
     )
 
-    # Convert LaTeX matrix environments into numpy array syntax
+    def _convert_matrix(m: re.Match) -> str:
+        rows = m.group(1).replace(r'\\', '], [').replace('&', ', ')
+        return f"np.array([{rows}])"
+
     latex_str = re.sub(
         r"\\begin\{bmatrix\}(.*?)\\end\{bmatrix\}",
-        lambda m: f"np.array([{m.group(1).replace(r'\\\\', '], [').replace('&', ', ')}])",
+        _convert_matrix,
         latex_str,
         flags=re.DOTALL,
     )
