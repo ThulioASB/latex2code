@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -10,6 +10,8 @@ authors = [
 ]
 description = "A lightweight Python library and CLI tool to transpile LaTeX mathematical expressions into executable Python functions."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 keywords = ["latex", "sympy", "python", "transpile", "mathematics", "numpy"]
 classifiers = [
@@ -18,7 +20,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Topic :: Software Development :: Code Generators",

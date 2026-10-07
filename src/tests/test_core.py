@@ -56,6 +56,91 @@ def test_inspection_api_reports_expression_variables_warnings_and_source():
     assert "eager elementwise selection" in details.warnings[0]
     assert "def formula(x):" in details.generated_code
     assert "np.pi" in details.generated_code
+    assert details.expression_tree["type"] == "Piecewise"
+    assert len(details.expression_tree["args"]) == 2
+
+
+def test_variable_mapping_renames_arguments_and_preserves_values():
+    compiled = compile_latex(
+        r"\sin(\theta) + \lambda",
+        variable_map={"theta": "angle", "lambda": "wavelength"},
+    )
+
+    assert compiled.info.variables == ("wavelength", "angle")
+    assert "def formula(wavelength: float, angle: float)" in compiled.source
+    assert math.isclose(
+        compiled(angle=0.5, wavelength=2.0),
+        math.sin(0.5) + 2.0,
+    )
+
+
+def test_variable_mapping_works_inside_matrix_outputs():
+    compiled = compile_latex(
+        r"\begin{pmatrix} \theta & 1 \\ 0 & \lambda \end{pmatrix}",
+        backend="numpy",
+        type_hints=False,
+        variable_map={"theta": "angle", "lambda": "wavelength"},
+    )
+
+    assert compiled.info.variables == ("angle", "wavelength")
+    assert np.array_equal(
+        compiled(angle=2.0, wavelength=3.0),
+        np.array([[2.0, 1.0], [0.0, 3.0]]),
+    )
+
+
+@pytest.mark.parametrize(
+    ("variable_map", "message"),
+    [
+        ({"missing": "name"}, "not present in the expression"),
+        ({"x": "invalid-name"}, "valid non-keyword Python identifier"),
+        ({"x": "result", "y": "result"}, "same Python identifier"),
+    ],
+)
+def test_variable_mapping_rejects_unknown_invalid_or_colliding_names(variable_map, message):
+    with pytest.raises(LaTeXTranspilerError, match=message):
+        transpile_latex("x + y", variable_map=variable_map)
+
+
+@pytest.mark.parametrize(
+    "spacing",
+    [r"\quad", r"\qquad", r"\,", r"\;", r"\!", r"\hspace{1em}", r"\vspace{2pt}"],
+)
+def test_presentation_spacing_commands_do_not_change_expression(spacing):
+    plain = transpile_latex("x + y", type_hints=False)
+    spaced = transpile_latex(f"x {spacing} + {spacing} y", type_hints=False)
+
+    assert spaced == plain
+
+
+@pytest.mark.parametrize("style_command", [r"\displaystyle", r"\textstyle", r"\scriptstyle"])
+def test_math_style_commands_do_not_change_expression(style_command):
+    assert transpile_latex(f"{style_command} x + y") == transpile_latex("x + y")
+
+
+def test_variable_mapping_requires_string_names():
+    with pytest.raises(LaTeXTranspilerError, match="keys and values must be strings"):
+        transpile_latex("x", variable_map={1: "x"})
+
+
+def test_gaussian_density_example_has_reproducible_reference_value():
+    density = compile_latex(
+        r"\frac{1}{\sigma \sqrt{2 \pi}}"
+        r"\exp(-\frac{(x-\mu)^2}{2 \sigma^2})",
+        type_hints=False,
+    )
+
+    assert density.info.variables == ("mu", "sigma", "x")
+    assert math.isclose(
+        density(x=0.0, mu=0.0, sigma=2.0),
+        0.19947114020071635,
+        rel_tol=1e-14,
+    )
+    assert math.isclose(
+        density(x=2.0, mu=0.0, sigma=2.0),
+        math.exp(-0.5) / (2 * math.sqrt(2 * math.pi)),
+        rel_tol=1e-14,
+    )
 
 
 def test_compile_api_returns_callable_with_reusable_source_and_metadata():
@@ -728,9 +813,41 @@ def test_safe_fallback_rejects_non_math_python_syntax():
 
 
 def test_matrix_rows_must_have_matching_dimensions():
-    with pytest.raises(InvalidLaTeXSyntaxError, match=r"Location: line 1, column 25") as error:
+    with pytest.raises(InvalidLaTeXSyntaxError, match=r"Location: line 1, column 26") as error:
         transpile_latex(r"\begin{pmatrix} x & y \\ z \end{pmatrix}")
     assert "same number of entries" in str(error.value)
+
+
+def test_malformed_matrix_entry_reports_nested_source_location():
+    expression = "\\begin{pmatrix}\n x & \\sin(\n 0 & 1\n\\end{pmatrix}"
+
+    with pytest.raises(InvalidLaTeXSyntaxError, match=r"Location: line 2, column 10") as error:
+        transpile_latex(expression)
+
+    assert error.value.line == 2
+    assert error.value.column == 10
+    assert "\\sin(" in str(error.value)
+
+
+def test_malformed_piecewise_expression_reports_nested_source_location():
+    expression = "\\begin{cases}\n x + & x > 0 \\\\ 0 & otherwise\n\\end{cases}"
+
+    with pytest.raises(InvalidLaTeXSyntaxError, match=r"Location: line 2, column 5") as error:
+        transpile_latex(expression)
+
+    assert error.value.line == 2
+    assert error.value.column == 5
+
+
+def test_piecewise_row_without_separator_points_to_offending_row():
+    expression = "\\begin{cases}\n x & x > 0 \\\\ malformed\n\\end{cases}"
+
+    with pytest.raises(InvalidLaTeXSyntaxError, match=r"Location: line 2, column 15") as error:
+        transpile_latex(expression)
+
+    assert error.value.line == 2
+    assert error.value.column == 15
+    assert "Each cases row must separate" in str(error.value)
 
 
 @pytest.mark.parametrize(
@@ -773,7 +890,56 @@ def test_cli_inspect_prints_json_report(monkeypatch, capsys):
     assert report["parsed_expression"] == "theta + pi"
     assert report["variables"] == ["theta"]
     assert "math.pi" in report["generated_code"]
+    assert report["expression_tree"]["type"] == "Add"
     assert report["warnings"] == []
+
+
+def test_cli_maps_variables_to_python_argument_names(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["latex2code", r"\theta + x", "--map-variable", "theta=angle", "--no-types"],
+    )
+
+    cli_main()
+
+    output = capsys.readouterr().out
+    assert "def formula(angle, x):" in output
+    assert "return angle + x" in output
+
+
+def test_cli_interactive_generates_multiple_expressions(monkeypatch, capsys):
+    expressions = iter([r"\pi x", r"\sin(y)", "quit"])
+    monkeypatch.setattr("sys.argv", ["latex2code", "--interactive", "--no-types"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(expressions))
+
+    cli_main()
+
+    output = capsys.readouterr().out
+    assert "latex2code interactive" in output
+    assert "return math.pi*x" in output
+    assert "return math.sin(y)" in output
+
+
+def test_cli_interactive_accepts_multiline_expression(monkeypatch, capsys):
+    expressions = iter([":begin", r"\frac{1}{", r"x + y}", ":end", "quit"])
+    monkeypatch.setattr("sys.argv", ["latex2code", "--interactive", "--no-types"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(expressions))
+
+    cli_main()
+
+    assert "return 1/(x + y)" in capsys.readouterr().out
+
+
+def test_cli_interactive_reports_bad_expression_and_continues(monkeypatch, capsys):
+    expressions = iter(["x +", "y", "quit"])
+    monkeypatch.setattr("sys.argv", ["latex2code", "--interactive", "--no-types"])
+    monkeypatch.setattr("builtins.input", lambda prompt: next(expressions))
+
+    cli_main()
+
+    captured = capsys.readouterr()
+    assert "ends with an operator" in captured.err
+    assert "return y" in captured.out
 
 
 def test_cli_inspect_rejects_output_file_option(monkeypatch):

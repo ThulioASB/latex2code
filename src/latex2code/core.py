@@ -4,7 +4,7 @@ import keyword
 import re
 import warnings
 from dataclasses import dataclass
-from typing import Callable, Literal
+from typing import Callable, Literal, Mapping
 import sympy as sp
 from sympy.core.function import UndefinedFunction
 from sympy.parsing.latex import parse_latex
@@ -125,6 +125,7 @@ class TranspilationInfo:
     input_expression: str
     backend: str
     parsed_expression: str
+    expression_tree: dict[str, object]
     variables: tuple[str, ...]
     generated_code: str
     warnings: tuple[str, ...]
@@ -294,6 +295,32 @@ def _normalize_latex_string(latex_str: str) -> str:
     normalized = normalized.replace(r"\land", " and ").replace(r"\lor", " or ")
     normalized = normalized.replace(r"\not", " not ")
 
+    spacing_commands = (
+        r"\\(?:,|;|!|:|quad\b|qquad\b|enspace\b|thinspace\b|medspace\b|"
+        r"thickspace\b|negthinspace\b|hfill\b|vfill\b|allowbreak\b)"
+    )
+    normalized = re.sub(
+        spacing_commands,
+        lambda match: "".join(
+            "\n" if character == "\n" else " " for character in match.group(0)
+        ),
+        normalized,
+    )
+    sized_spacing_commands = r"\\(?:hspace|vspace)\*?\s*(?:\{[^{}]*\}|\[[^\[\]]*\])"
+    normalized = re.sub(
+        sized_spacing_commands,
+        lambda match: "".join(
+            "\n" if character == "\n" else " " for character in match.group(0)
+        ),
+        normalized,
+    )
+    style_commands = r"\\(?:displaystyle|textstyle|scriptstyle|scriptscriptstyle)\b"
+    normalized = re.sub(
+        style_commands,
+        lambda match: " " * len(match.group(0)),
+        normalized,
+    )
+
     normalized = normalized.replace(r"\left[", "(").replace(r"\right]", ")")
     normalized = normalized.replace(r"\left\{", "(").replace(r"\right\}", ")")
     normalized = normalized.replace(r"\left", "").replace(r"\right", "")
@@ -413,6 +440,40 @@ def _parse_operatorname_expression(latex_str: str) -> sp.Expr:
     return parsed
 
 
+def _split_environment_rows(content: str, content_offset: int) -> list[tuple[str, int]]:
+    rows = []
+    start = 0
+    for separator in re.finditer(r"\\\\{1,2}", content):
+        segment = content[start : separator.start()]
+        leading = len(segment) - len(segment.lstrip())
+        row = segment.strip()
+        if row:
+            rows.append((row, content_offset + start + leading))
+        start = separator.end()
+    segment = content[start:]
+    leading = len(segment) - len(segment.lstrip())
+    row = segment.strip()
+    if row:
+        rows.append((row, content_offset + start + leading))
+    return rows
+
+
+def _parse_latex_segment(segment: str, raw_expression: str, offset: int) -> sp.Expr:
+    try:
+        return parse_latex(segment, strict=True)
+    except Exception as exc:
+        relative_location = _syntax_location(segment, exc) or (1, 1)
+        relative_index = sum(
+            len(line) + 1
+            for line in segment.splitlines()[: relative_location[0] - 1]
+        ) + relative_location[1] - 1
+        raise InvalidLaTeXSyntaxError(
+            raw_expression,
+            original_error=exc,
+            location=_line_and_column(raw_expression, offset + relative_index),
+        ) from exc
+
+
 def _parse_matrix_environment(latex_str: str) -> sp.Matrix | None:
     """Detects and parses matrix-style environments directly into a SymPy Matrix."""
     pattern = (
@@ -420,37 +481,47 @@ def _parse_matrix_environment(latex_str: str) -> sp.Matrix | None:
         r"(?:\{.*?\})?"
         r"(?P<content>.*?)\\end\{(?P=environment)\}"
     )
-    match = re.fullmatch(pattern, latex_str.strip(), re.DOTALL)
+    stripped_expression = latex_str.strip()
+    expression_offset = len(latex_str) - len(latex_str.lstrip())
+    match = re.fullmatch(pattern, stripped_expression, re.DOTALL)
     if not match:
         return None
 
-    content = match.group("content").strip()
-    rows = [row.strip() for row in re.split(r"\\\\{1,2}", content) if row.strip()]
-
+    content = match.group("content")
+    content_offset = expression_offset + match.start("content")
+    rows = _split_environment_rows(content, content_offset)
     matrix_rows = []
     row_offsets = []
-    content_offset = match.start("content")
-    search_from = 0
     try:
-        for row in rows:
-            row_start = content.find(row, search_from)
-            search_from = row_start + len(row)
+        for row, row_offset in rows:
             elements = []
-            for elem in [segment.strip() for segment in row.split("&")]:
+            segment_start = 0
+            for segment in row.split("&"):
+                raw_start = row.find(segment, segment_start)
+                segment_start = raw_start + len(segment) + 1
+                leading = len(segment) - len(segment.lstrip())
+                elem = segment.strip()
                 if not elem:
                     continue
+                elem_offset = row_offset + raw_start + leading
                 if elem.startswith("="):
                     elem = elem[1:].strip()
+                    elem_offset += 1
                 if elem.startswith("=="):
                     elem = elem[2:].strip()
-                elements.append(elem)
+                    elem_offset += 2
+                elements.append((elem, elem_offset))
             if not elements:
                 continue
-            parsed_elements = [parse_latex(elem, strict=True) for elem in elements if elem]
+            parsed_elements = [
+                _parse_latex_segment(elem, latex_str, elem_offset)
+                for elem, elem_offset in elements
+                if elem
+            ]
             if not parsed_elements:
                 continue
             matrix_rows.append(parsed_elements)
-            row_offsets.append(content_offset + row_start)
+            row_offsets.append(row_offset)
         if not matrix_rows:
             return None
         expected_width = len(matrix_rows[0])
@@ -478,29 +549,45 @@ def _parse_matrix_environment(latex_str: str) -> sp.Matrix | None:
 def _parse_cases_environment(latex_str: str) -> sp.Expr | None:
     r"""Parses piecewise expressions from \begin{cases} ... \end{cases} into SymPy Piecewise."""
     pattern = r"\\begin\{cases\}(.*?)\\end\{cases\}"
-    match = re.fullmatch(pattern, latex_str.strip(), re.DOTALL)
+    stripped_expression = latex_str.strip()
+    expression_offset = len(latex_str) - len(latex_str.lstrip())
+    match = re.fullmatch(pattern, stripped_expression, re.DOTALL)
     if not match:
         return None
 
-    content = match.group(1).strip()
-    rows = [row.strip() for row in re.split(r"\\\\{1,2}", content) if row.strip()]
+    content = match.group(1)
+    rows = _split_environment_rows(
+        content,
+        expression_offset + match.start(1),
+    )
     if not rows:
         return None
 
     pieces = []
     try:
-        for row in rows:
+        for row, row_offset in rows:
             if "&" not in row:
                 raise InvalidLaTeXSyntaxError(
                     latex_str,
                     hint="Each cases row must separate its value and condition with '&'.",
+                    location=_line_and_column(latex_str, row_offset),
                 )
-            expr_part, cond_part = [segment.strip() for segment in row.split("&", 1)]
-            expr = parse_latex(expr_part, strict=True)
-            cond = (
-                parse_latex(cond_part, strict=True)
-                if cond_part.lower() not in {"otherwise", "else"}
-                else True
+            separator = row.index("&")
+            expression_segment = row[:separator]
+            condition_segment = row[separator + 1 :]
+            expression_leading = len(expression_segment) - len(expression_segment.lstrip())
+            condition_leading = len(condition_segment) - len(condition_segment.lstrip())
+            expr_part = expression_segment.strip()
+            cond_part = condition_segment.strip()
+            expr = _parse_latex_segment(
+                expr_part,
+                latex_str,
+                row_offset + expression_leading,
+            )
+            cond = True if cond_part.lower() in {"otherwise", "else"} else _parse_latex_segment(
+                cond_part,
+                latex_str,
+                row_offset + separator + 1 + condition_leading,
             )
             pieces.append((expr, cond))
         if not pieces:
@@ -879,6 +966,26 @@ def _ordered_free_symbols(expr: sp.Expr, raw_latex: str) -> list[str]:
     return sorted(free_symbols)
 
 
+def _expression_tree(expr: sp.Expr | sp.MatrixBase) -> dict[str, object]:
+    if isinstance(expr, sp.MatrixBase):
+        return {
+            "type": type(expr).__name__,
+            "shape": list(expr.shape),
+            "args": [
+                [_expression_tree(value) for value in row]
+                for row in expr.tolist()
+            ],
+        }
+    node: dict[str, object] = {
+        "type": getattr(expr.func, "__name__", type(expr).__name__),
+    }
+    if expr.args:
+        node["args"] = [_expression_tree(argument) for argument in expr.args]
+    else:
+        node["value"] = str(expr)
+    return node
+
+
 def _check_for_undefined_commands(expr: sp.Expr, raw_str: str) -> None:
     """Check if the raw LaTeX string or parsed expression contains unsupported commands."""
     unhandled_commands = re.findall(r"\\[A-Za-z]+", raw_str)
@@ -909,6 +1016,7 @@ def _transpile_latex(
     type_hints: bool = True,
     use_numpy: bool = False,
     backend: Literal["python", "numpy", "torch", "jax"] | None = None,
+    variable_map: Mapping[str, str] | None = None,
 ) -> TranspilationInfo:
     """Build generated source and inspection details from a LaTeX expression."""
     if not latex_str or not latex_str.strip():
@@ -962,6 +1070,41 @@ def _transpile_latex(
 
     # 2. Extract free variables
     variables = _ordered_free_symbols(expr, normalized_latex)
+    if variable_map is not None:
+        if not isinstance(variable_map, Mapping):
+            raise LaTeXTranspilerError(
+                "variable_map must map symbol names to Python identifiers."
+            )
+        if not all(
+            isinstance(source, str) and isinstance(target, str)
+            for source, target in variable_map.items()
+        ):
+            raise LaTeXTranspilerError(
+                "variable_map keys and values must be strings."
+            )
+        unknown_symbols = set(variable_map) - set(variables)
+        if unknown_symbols:
+            raise LaTeXTranspilerError(
+                "variable_map contains symbols not present in the expression: "
+                f"{', '.join(sorted(unknown_symbols))}."
+            )
+        mapped_variables = [
+            variable_map.get(variable, variable)
+            for variable in variables
+        ]
+        for variable in mapped_variables:
+            _validate_python_identifier(variable, "Mapped argument name")
+        if len(set(mapped_variables)) != len(mapped_variables):
+            raise LaTeXTranspilerError(
+                "variable_map must not map multiple symbols to the same Python identifier."
+            )
+        expr = expr.xreplace(
+            {
+                sp.Symbol(source): sp.Symbol(target)
+                for source, target in variable_map.items()
+            }
+        )
+        variables = mapped_variables
     transpilation_warnings = []
     for variable in variables:
         _validate_python_identifier(variable, "Generated argument name")
@@ -1088,6 +1231,7 @@ def _transpile_latex(
         input_expression=latex_str,
         backend=backend,
         parsed_expression=str(expr),
+        expression_tree=_expression_tree(expr),
         variables=tuple(variables),
         generated_code=code,
         warnings=tuple(transpilation_warnings),
@@ -1100,10 +1244,11 @@ def transpile_latex(
     type_hints: bool = True,
     use_numpy: bool = False,
     backend: Literal["python", "numpy", "torch", "jax"] | None = None,
+    variable_map: Mapping[str, str] | None = None,
 ) -> str:
     """Convert LaTeX into Python source targeting Python math, NumPy, PyTorch, or JAX."""
     return _transpile_latex(
-        latex_str, function_name, type_hints, use_numpy, backend
+        latex_str, function_name, type_hints, use_numpy, backend, variable_map
     ).generated_code
 
 
@@ -1113,9 +1258,12 @@ def inspect_latex(
     type_hints: bool = True,
     use_numpy: bool = False,
     backend: Literal["python", "numpy", "torch", "jax"] | None = None,
+    variable_map: Mapping[str, str] | None = None,
 ) -> TranspilationInfo:
     """Return the parsed expression, variables, warnings, and generated source."""
-    return _transpile_latex(latex_str, function_name, type_hints, use_numpy, backend)
+    return _transpile_latex(
+        latex_str, function_name, type_hints, use_numpy, backend, variable_map
+    )
 
 
 def compile_latex(
@@ -1124,6 +1272,7 @@ def compile_latex(
     type_hints: bool = True,
     use_numpy: bool = False,
     backend: Literal["python", "numpy", "torch", "jax"] | None = None,
+    variable_map: Mapping[str, str] | None = None,
 ) -> CompiledFormula:
     """Compile LaTeX into a callable and retain its generated source and metadata."""
     info = inspect_latex(
@@ -1132,6 +1281,7 @@ def compile_latex(
         type_hints=type_hints,
         use_numpy=use_numpy,
         backend=backend,
+        variable_map=variable_map,
     )
     namespace: dict[str, object] = {}
     exec(info.generated_code, namespace)
