@@ -76,6 +76,21 @@ def calculate_wave(x: float, y: float, z: float) -> float:
 For direct evaluation in a notebook or application, use `compile_latex`. The returned object is
 callable and retains the generated source and inspection details:
 
+The convenience helper `latex_to_code` accepts the same generation options as the main transpiler
+while keeping support for legacy macro overrides such as `custom_symbol_map`:
+
+```python
+from latex2code import latex_to_code
+
+code = latex_to_code(
+    r"\theta + \lambda",
+    custom_symbol_map={r"\lambda": "lambda_value"},
+    function_name="signal_model",
+    type_hints=False,
+)
+print(code)
+```
+
 ```python
 from latex2code import compile_latex
 

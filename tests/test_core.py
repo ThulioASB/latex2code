@@ -3,7 +3,13 @@ from io import StringIO
 import math
 import numpy as np
 import pytest
-from latex2code import __version__, compile_latex, inspect_latex, transpile_latex
+from latex2code import (
+    __version__,
+    compile_latex,
+    inspect_latex,
+    latex_to_code,
+    transpile_latex,
+)
 from latex2code.core import (
     CodeGenerationError,
     InvalidLaTeXSyntaxError,
@@ -13,6 +19,26 @@ from latex2code.core import (
     UnsupportedLaTeXFeatureError,
 )
 from latex2code.cli import main as cli_main
+
+
+def test_public_api_exposes_latex_to_code_helper():
+    code = latex_to_code(r"\frac{x}{y}")
+    assert "def formula(x: float, y: float) -> float:" in code
+    assert "return x/y" in code
+
+
+def test_latex_to_code_accepts_transpiler_options_and_custom_maps():
+    code = latex_to_code(
+        r"\theta + \lambda",
+        custom_symbol_map={r"\lambda": "lambda_value"},
+        function_name="model",
+        type_hints=False,
+        variable_map={"theta": "angle"},
+    )
+    assert "def model(" in code
+    assert "lambda_value" in code
+    assert "angle" in code
+    assert "return angle + lambda_value" in code
 
 
 def test_simple_fraction():

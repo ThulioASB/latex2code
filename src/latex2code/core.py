@@ -1,5 +1,6 @@
 import ast
 import difflib
+import importlib.util
 import keyword
 import re
 import warnings
@@ -1034,6 +1035,16 @@ def _transpile_latex(
         raise LaTeXTranspilerError(
             "use_numpy=True conflicts with an explicit backend; use backend='numpy' instead."
         )
+    if backend == "torch" and importlib.util.find_spec("torch") is None:
+        raise LaTeXTranspilerError(
+            "The 'torch' backend requires the optional dependency 'torch'. "
+            "Install it with `pip install latex2code[torch]`."
+        )
+    if backend == "jax" and importlib.util.find_spec("jax") is None:
+        raise LaTeXTranspilerError(
+            "The 'jax' backend requires the optional dependency 'jax'. "
+            "Install it with `pip install latex2code[jax]`."
+        )
 
     normalized_latex = _normalize_latex_string(latex_str)
 
@@ -1295,33 +1306,50 @@ def compile_latex(
     return CompiledFormula(info=info, function=function)
 
 def latex_to_code(
-    latex_str: str, custom_symbol_map: dict[str, str] | None = None
+    latex_str: str,
+    custom_symbol_map: dict[str, str] | None = None,
+    *,
+    function_name: str = "formula",
+    type_hints: bool = True,
+    use_numpy: bool = False,
+    backend: Literal["python", "numpy", "torch", "jax"] | None = None,
+    variable_map: Mapping[str, str] | None = None,
 ) -> str:
-    """Converts a LaTeX math string to executable Python/NumPy code.
+    """Convert LaTeX into executable Python code using the main transpile pipeline.
 
-    Optional custom_symbol_map overrides specific LaTeX macros (e.g. {'\\alpha':
-    'alpha_val'}).
+    This helper preserves the historical `custom_symbol_map` behavior for macro
+    overrides while also accepting the same generation options as
+    :func:`transpile_latex`. Values are remapped via the standard variable map
+    after the LaTeX parser has interpreted the expression.
     """
+    normalized = latex_str
+    merged_variable_map = dict(variable_map) if variable_map is not None else {}
+
     if custom_symbol_map:
         for macro, python_var in custom_symbol_map.items():
-            latex_str = latex_str.replace(macro, python_var)
+            if not isinstance(macro, str) or not macro.startswith("\\"):
+                raise LaTeXTranspilerError(
+                    "custom_symbol_map keys must be LaTeX command strings like '\\lambda'."
+                )
+            symbol_name = macro.lstrip("\\")
+            if not re.fullmatch(r"[A-Za-z]+", symbol_name):
+                raise LaTeXTranspilerError(
+                    "custom_symbol_map supports plain LaTeX symbol commands such as '\\lambda'; "
+                    f"received {macro!r}."
+                )
+            merged_variable_map[symbol_name] = python_var
 
-    # Strip purely visual LaTeX formatting tags before parsing
-    latex_str = re.sub(
-        r"\\(vspace|hspace|quad|qquad|textbf|mathrm|text)\{[^}]*\}", "", latex_str
+    normalized = re.sub(
+        r"\\(vspace|hspace|quad|qquad|textbf|mathrm|text)\{[^}]*\}",
+        "",
+        normalized,
     )
 
-    def _convert_matrix(m: re.Match) -> str:
-        rows = m.group(1).replace(r'\\', '], [').replace('&', ', ')
-        return f"np.array([{rows}])"
-
-    latex_str = re.sub(
-        r"\\begin\{bmatrix\}(.*?)\\end\{bmatrix\}",
-        _convert_matrix,
-        latex_str,
-        flags=re.DOTALL,
+    return transpile_latex(
+        normalized,
+        function_name=function_name,
+        type_hints=type_hints,
+        use_numpy=use_numpy,
+        backend=backend,
+        variable_map=merged_variable_map or None,
     )
-
-    # Execute compilation using your existing compile_latex pipeline
-    compiled = compile_latex(latex_str)
-    return compiled.info.generated_code
