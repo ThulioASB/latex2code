@@ -187,21 +187,24 @@ def test_jax_backend_matches_scalar_and_array_values_and_gradients():
 
 @pytest.mark.parametrize("backend", ["torch", "jax"])
 def test_framework_matrix_outputs_preserve_gradients(backend):
+    if backend == "torch":
+        torch = pytest.importorskip("torch")
+    else:
+        jax = pytest.importorskip("jax")
+        jax_numpy = pytest.importorskip("jax.numpy")
+
     latex = r"\begin{pmatrix} x & x^2 \\ 0 & 1 \end{pmatrix}"
     code = transpile_latex(latex, backend=backend, type_hints=False)
     scope = {}
     exec(code, scope)
 
     if backend == "torch":
-        torch = pytest.importorskip("torch")
         value = torch.tensor(0.5, requires_grad=True)
         result = scope["formula"](value)
         result.sum().backward()
         assert torch.allclose(result, torch.tensor([[0.5, 0.25], [0.0, 1.0]]))
         assert math.isclose(value.grad.item(), 2.0, rel_tol=1e-6)
     else:
-        jax = pytest.importorskip("jax")
-        jax_numpy = pytest.importorskip("jax.numpy")
         value = jax_numpy.asarray(0.5)
         result = scope["formula"](value)
         gradient = jax.grad(lambda item: scope["formula"](item).sum())(value)
@@ -706,6 +709,12 @@ def test_machine_learning_operators_support_scalar_inputs():
 
 @pytest.mark.parametrize("backend", ["python", "numpy", "torch", "jax"])
 def test_beta_function_is_stable_and_differentiable_where_supported(backend):
+    if backend == "torch":
+        torch = pytest.importorskip("torch")
+    elif backend == "jax":
+        jax = pytest.importorskip("jax")
+        jax_numpy = pytest.importorskip("jax.numpy")
+
     code = transpile_latex(
         r"\operatorname{beta}(x, y)",
         backend=backend,
@@ -713,6 +722,7 @@ def test_beta_function_is_stable_and_differentiable_where_supported(backend):
     )
     scope = {}
     exec(code, scope)
+
     expected = [
         (
             math.copysign(1.0, math.sin(math.pi * x)) if x < 0 else 1.0
@@ -739,7 +749,6 @@ def test_beta_function_is_stable_and_differentiable_where_supported(backend):
         assert np.all(np.isfinite(actual))
         assert np.allclose(actual, expected, rtol=1e-12, atol=0)
     elif backend == "torch":
-        torch = pytest.importorskip("torch")
         values = torch.tensor([-0.5, 2.0, 100.0], dtype=torch.float64)
         second = torch.tensor([2.0, 3.0, 100.0], dtype=torch.float64)
         actual = scope["formula"](values, second)
@@ -754,8 +763,6 @@ def test_beta_function_is_stable_and_differentiable_where_supported(backend):
         )
         assert math.isclose(x.grad.item(), expected_gradient, rel_tol=1e-10)
     else:
-        jax = pytest.importorskip("jax")
-        jax_numpy = pytest.importorskip("jax.numpy")
         values = jax_numpy.asarray([-0.5, 2.0, 100.0])
         second = jax_numpy.asarray([2.0, 3.0, 100.0])
         actual = scope["formula"](values, second)
