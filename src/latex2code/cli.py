@@ -10,8 +10,14 @@ def main():
     )
     parser.add_argument(
         "latex",
+        nargs="?",
         type=str,
         help="The LaTeX expression wrapped in quotes, or '-' to read from stdin",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="%(prog)s 0.2.0",
     )
     parser.add_argument(
         "-n",
@@ -29,7 +35,12 @@ def main():
         "-p",
         "--numpy",
         action="store_true",
-        help="Use NumPy arrays and functions",
+        help="Legacy alias for --backend numpy",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("python", "numpy", "torch", "jax"),
+        help="Generated code target (default: python, or numpy when --numpy is used)",
     )
     parser.add_argument(
         "-o",
@@ -39,6 +50,9 @@ def main():
     )
 
     args = parser.parse_args()
+
+    if args.latex is None:
+        parser.error("the following arguments are required: latex")
 
     latex_input = args.latex
     if latex_input == "-":
@@ -50,8 +64,10 @@ def main():
             function_name=args.name,
             type_hints=not args.no_types,
             use_numpy=args.numpy,
+            backend=args.backend,
         )
         if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(code, encoding="utf-8")
         else:
             print("\n# Generated Python Code:")

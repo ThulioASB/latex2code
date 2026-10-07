@@ -39,6 +39,8 @@ dev = [
     "pytest>=7.0.0",
     "build>=1.2.0",
 ]
+torch = ["torch>=2.0"]
+jax = ["jax>=0.4"]
 
 [project.scripts]
 latex2code = "latex2code.cli:main"

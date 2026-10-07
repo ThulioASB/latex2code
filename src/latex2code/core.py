@@ -1,9 +1,13 @@
 import ast
+import difflib
 import keyword
 import re
+import warnings
+from typing import Literal
 import sympy as sp
 from sympy.core.function import UndefinedFunction
 from sympy.parsing.latex import parse_latex
+from sympy.printing.pycode import PythonCodePrinter
 from sympy.printing.numpy import NumPyPrinter
 
 
@@ -24,48 +28,85 @@ VALID_LATEX_COMMANDS = {
     r"\frac", r"\sin", r"\cos", r"\tan", r"\cot", r"\sec", r"\csc",
     r"\sinh", r"\cosh", r"\tanh", r"\coth", r"\sech", r"\csch",
     r"\asin", r"\arcsin", r"\acos", r"\arccos", r"\atan", r"\arctan",
+    r"\acot", r"\arccot", r"\asec", r"\arcsec", r"\acsc", r"\arccsc",
     r"\asinh", r"\acosh", r"\atanh", r"\sqrt", r"\sum", r"\prod",
     r"\lim", r"\max", r"\min", r"\binom", r"\Gamma", r"\beta",
     r"\left", r"\right", r"\begin", r"\end", r"\exp", r"\log", r"\ln",
     r"\int", r"\diff", r"\partial", r"\pm", r"\mp", r"\times", r"\cdot",
-    r"\div", r"\ge", r"\le", r"\neq", r"\pi", r"\theta", r"\alpha",
-    r"\beta", r"\gamma", r"\delta", r"\epsilon", r"\varepsilon", r"\zeta",
-    r"\eta", r"\kappa", r"\lambda", r"\mu", r"\nu", r"\xi", r"\rho",
-    r"\sigma", r"\tau", r"\upsilon", r"\phi", r"\varphi", r"\chi",
-    r"\psi", r"\omega", r"\Gamma", r"\Delta", r"\Lambda", r"\Sigma",
-    r"\Theta", r"\Omega", r"\Phi", r"\Pi", r"\Psi", r"\Xi", r"\Upsilon",
-    r"\operatorname", r"\mathrm", r"\cases", r"\vert", r"\mid", r"\lvert",
-    r"\rvert", r"\langle", r"\rangle", r"\lfloor", r"\rfloor", r"\lceil",
-    r"\rceil", r"\to",
+    r"\div", r"\ge", r"\le", r"\neq", r"\approx", r"\equiv", r"\propto",
+    r"\sim", r"\land", r"\lor", r"\neg", r"\not", r"\infty", r"\pi",
+    r"\theta", r"\alpha", r"\beta", r"\gamma", r"\delta", r"\epsilon",
+    r"\varepsilon", r"\zeta", r"\eta", r"\kappa", r"\lambda", r"\mu",
+    r"\nu", r"\xi", r"\rho", r"\sigma", r"\tau", r"\upsilon", r"\phi",
+    r"\varphi", r"\chi", r"\psi", r"\omega", r"\Gamma", r"\Delta",
+    r"\Lambda", r"\Sigma", r"\Theta", r"\Omega", r"\Phi", r"\Pi",
+    r"\Psi", r"\Xi", r"\Upsilon", r"\operatorname", r"\mathrm",
+    r"\cases", r"\array", r"\align", r"\align*", r"\aligned",
+    r"\gathered", r"\eqnarray", r"\eqnarray*", r"\vert", r"\mid",
+    r"\lvert", r"\rvert", r"\langle", r"\rangle", r"\lfloor",
+    r"\rfloor", r"\lceil", r"\rceil", r"\to",
 }
 
 
 class InvalidLaTeXSyntaxError(LaTeXTranspilerError):
     """Raised when the provided LaTeX string cannot be parsed."""
 
-    def __init__(self, raw_expression: str, original_error: Exception | None = None):
+    def __init__(
+        self,
+        raw_expression: str,
+        original_error: Exception | None = None,
+        hint: str | None = None,
+    ):
         self.raw_expression = raw_expression
         self.original_error = original_error
+        hint = hint or _syntax_hint(raw_expression)
         message = (
             f"Failed to parse LaTeX expression: '{raw_expression}'. "
-            "Please verify brackets, syntax, and LaTeX mathematical commands."
+            "Please verify the expression syntax and supported LaTeX subset."
         )
+        if hint:
+            message += f" Hint: {hint}"
         super().__init__(message)
 
 
 class UnsupportedLaTeXFeatureError(InvalidLaTeXSyntaxError):
     """Raised when syntax is valid-looking but uses an unsupported command or function."""
 
-    def __init__(self, raw_expression: str, feature: str, kind: str = "LaTeX command"):
+    def __init__(
+        self,
+        raw_expression: str,
+        feature: str,
+        kind: str = "LaTeX command",
+        suggestion: str | None = None,
+    ):
         self.raw_expression = raw_expression
         self.original_error = None
         self.feature = feature
         self.kind = kind
-        LaTeXTranspilerError.__init__(self, f"Unsupported {kind}: {feature}.")
+        message = f"Unsupported {kind}: {feature}."
+        if suggestion:
+            message += f" Did you mean {suggestion}?"
+        LaTeXTranspilerError.__init__(self, message)
 
 
 class CodeGenerationError(LaTeXTranspilerError):
     """Raised when a parsed expression cannot be represented as executable Python."""
+
+
+class PiecewiseEvaluationWarning(UserWarning):
+    """Warns when array backends eagerly evaluate all branches of a piecewise expression."""
+
+
+def _syntax_hint(expression: str) -> str | None:
+    for opening, closing, label in (("{", "}", "curly braces"), ("(", ")", "parentheses"), ("[", "]", "square brackets")):
+        if expression.count(opening) != expression.count(closing):
+            return f"Check that {label} are balanced."
+
+    environments = re.findall(r"\\begin\{([^}]+)\}", expression)
+    endings = re.findall(r"\\end\{([^}]+)\}", expression)
+    if environments != endings:
+        return "Make sure each \\begin{...} has a matching \\end{...} of the same environment."
+    return None
 
 
 def _validate_python_identifier(identifier: object, kind: str) -> None:
@@ -77,15 +118,41 @@ def _validate_python_identifier(identifier: object, kind: str) -> None:
         raise InvalidPythonIdentifierError(identifier, kind)
 
 
+class _StableSigmoid(sp.Function):
+    nargs = 1
+
+
+class _StableSoftplus(sp.Function):
+    nargs = 1
+
+
+class _StableSwish(sp.Function):
+    nargs = 1
+
+
+class _StableBeta(sp.Function):
+    nargs = 2
+
+
 OPERATORNAME_FUNCTIONS = {
     "erf": sp.erf,
     "erfc": sp.erfc,
     "gamma": sp.gamma,
-    "beta": sp.beta,
+    "beta": _StableBeta,
     "abs": sp.Abs,
     "sign": sp.sign,
     "floor": sp.floor,
     "ceiling": sp.ceiling,
+    "acot": sp.acot,
+    "asec": sp.asec,
+    "acsc": sp.acsc,
+    "hypot": lambda *args: sp.sqrt(sum(arg**2 for arg in args)),
+    "sigmoid": _StableSigmoid,
+    "softplus": _StableSoftplus,
+    "relu": lambda value: sp.Max(value, 0),
+    "logit": lambda value: sp.log(value / (1 - value)),
+    "softsign": lambda value: value / (1 + sp.Abs(value)),
+    "swish": _StableSwish,
 }
 
 
@@ -98,11 +165,19 @@ def _normalize_latex_string(latex_str: str) -> str:
     normalized = re.sub(r"\\mathrm\s*\{([A-Za-z]+)\}\s*\(", r"\1(", normalized)
     normalized = re.sub(r"\\mathrm\s*\{([A-Za-z]+)\}", r"\1", normalized)
     normalized = normalized.replace(r"\max", "max").replace(r"\min", "min")
+    normalized = normalized.replace(r"\infty", "oo").replace(r"\infty", "oo")
+    normalized = normalized.replace(r"\approx", "==").replace(r"\equiv", "==")
+    normalized = normalized.replace(r"\propto", "~").replace(r"\sim", "~")
+    normalized = normalized.replace(r"\land", " and ").replace(r"\lor", " or ")
+    normalized = normalized.replace(r"\not", " not ")
+
+    normalized = normalized.replace(r"\left[", "(").replace(r"\right]", ")")
+    normalized = normalized.replace(r"\left\{", "(").replace(r"\right\}", ")")
+    normalized = normalized.replace(r"\left", "").replace(r"\right", "")
 
     normalized = re.sub(r"\\left\s*\|\s*(.+?)\s*\\right\s*\|", r"Abs(\1)", normalized, flags=re.DOTALL)
     normalized = re.sub(r"\\left\s*\\lvert\s*(.+?)\s*\\right\s*\\rvert", r"Abs(\1)", normalized, flags=re.DOTALL)
 
-    normalized = normalized.replace(r"\left", "").replace(r"\right", "")
     normalized = normalized.replace(r"\vert", "|").replace(r"\mid", "|")
     return normalized
 
@@ -119,6 +194,36 @@ def _find_matching_parenthesis(text: str, start_index: int) -> int | None:
             if depth == 0:
                 return idx
     return None
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    """Split a comma-separated argument list while preserving nested parentheses/brackets."""
+    parts: list[str] = []
+    current: list[str] = []
+    depth = 0
+    bracket_depth = 0
+    brace_depth = 0
+    for char in text:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth = max(0, depth - 1)
+        elif char == "[":
+            bracket_depth += 1
+        elif char == "]":
+            bracket_depth = max(0, bracket_depth - 1)
+        elif char == "{":
+            brace_depth += 1
+        elif char == "}":
+            brace_depth = max(0, brace_depth - 1)
+        if char == "," and depth == 0 and bracket_depth == 0 and brace_depth == 0:
+            parts.append("".join(current).strip())
+            current = []
+            continue
+        current.append(char)
+    if current:
+        parts.append("".join(current).strip())
+    return [part for part in parts if part != ""]
 
 
 def _parse_operatorname_expression(latex_str: str) -> sp.Expr:
@@ -144,11 +249,24 @@ def _parse_operatorname_expression(latex_str: str) -> sp.Expr:
 
         args_text = expression[open_index + 1 : close_index]
         if args_text:
-            arg_expr = _parse_operatorname_expression(_normalize_latex_string(args_text))
+            arg_exprs = [
+                _parse_operatorname_expression(_normalize_latex_string(arg.strip()))
+                for arg in _split_top_level_commas(args_text)
+            ]
         else:
-            arg_expr = sp.Symbol("x")
+            arg_exprs = [sp.Symbol("x")]
 
-        factory = OPERATORNAME_FUNCTIONS.get(func_name, sp.Function(func_name))
+        if func_name == "hypot":
+            value = sp.sqrt(sum(arg**2 for arg in arg_exprs)) if arg_exprs else sp.Symbol("x")
+        elif func_name in {"sigmoid", "softplus", "relu", "logit", "softsign", "swish"} and len(arg_exprs) == 1:
+            value = OPERATORNAME_FUNCTIONS[func_name](arg_exprs[0])
+        else:
+            factory = OPERATORNAME_FUNCTIONS.get(func_name, sp.Function(func_name))
+            if len(arg_exprs) == 1:
+                value = factory(arg_exprs[0])
+            else:
+                value = factory(*arg_exprs)
+
         replacement_name = next(
             (
                 chr(codepoint)
@@ -161,7 +279,7 @@ def _parse_operatorname_expression(latex_str: str) -> sp.Expr:
             raise UnsupportedLaTeXFeatureError(
                 latex_str, "too many uppercase symbols to safely normalize operatorname"
             )
-        replacements[replacement_name] = factory(arg_expr)
+        replacements[replacement_name] = value
         expression = (
             expression[: match.start()] + replacement_name + expression[close_index + 1 :]
         )
@@ -173,9 +291,10 @@ def _parse_operatorname_expression(latex_str: str) -> sp.Expr:
 
 
 def _parse_matrix_environment(latex_str: str) -> sp.Matrix | None:
-    """Detects and parses matrix environments directly into a SymPy Matrix."""
+    """Detects and parses matrix-style environments directly into a SymPy Matrix."""
     pattern = (
-        r"\\begin\{(?P<environment>pmatrix|matrix|bmatrix|Bmatrix|vmatrix|Vmatrix)\}"
+        r"\\begin\{(?P<environment>pmatrix|matrix|bmatrix|Bmatrix|vmatrix|Vmatrix|array|aligned|align|align\*|gathered|eqnarray|eqnarray\*)\}"
+        r"(?:\{.*?\})?"
         r"(?P<content>.*?)\\end\{(?P=environment)\}"
     )
     match = re.fullmatch(pattern, latex_str.strip(), re.DOTALL)
@@ -188,10 +307,31 @@ def _parse_matrix_environment(latex_str: str) -> sp.Matrix | None:
     matrix_rows = []
     try:
         for row in rows:
-            elements = [elem.strip() for elem in row.split("&")]
-            parsed_elements = [parse_latex(elem) for elem in elements]
+            elements = []
+            for elem in [segment.strip() for segment in row.split("&")]:
+                if not elem:
+                    continue
+                if elem.startswith("="):
+                    elem = elem[1:].strip()
+                if elem.startswith("=="):
+                    elem = elem[2:].strip()
+                elements.append(elem)
+            if not elements:
+                continue
+            parsed_elements = [parse_latex(elem) for elem in elements if elem]
+            if not parsed_elements:
+                continue
             matrix_rows.append(parsed_elements)
+        if not matrix_rows:
+            return None
+        if len({len(row) for row in matrix_rows}) != 1:
+            raise InvalidLaTeXSyntaxError(
+                latex_str,
+                hint="Every row in a matrix or array must contain the same number of entries.",
+            )
         return sp.Matrix(matrix_rows)
+    except InvalidLaTeXSyntaxError:
+        raise
     except Exception as exc:
         raise InvalidLaTeXSyntaxError(latex_str, original_error=exc) from exc
 
@@ -212,7 +352,10 @@ def _parse_cases_environment(latex_str: str) -> sp.Expr | None:
     try:
         for row in rows:
             if "&" not in row:
-                raise ValueError(f"Unsupported cases row: {row!r}")
+                raise InvalidLaTeXSyntaxError(
+                    latex_str,
+                    hint="Each cases row must separate its value and condition with '&'.",
+                )
             expr_part, cond_part = [segment.strip() for segment in row.split("&", 1)]
             expr = parse_latex(expr_part)
             cond = parse_latex(cond_part) if cond_part.lower() not in {"otherwise", "else"} else True
@@ -221,6 +364,8 @@ def _parse_cases_environment(latex_str: str) -> sp.Expr | None:
             return None
 
         return sp.Piecewise(*pieces)
+    except InvalidLaTeXSyntaxError:
+        raise
     except Exception as exc:
         raise InvalidLaTeXSyntaxError(latex_str, original_error=exc) from exc
 
@@ -234,7 +379,7 @@ PYTHON_FUNCTIONS = {
     "erfc": sp.erfc,
     "gamma": sp.gamma,
     "Gamma": sp.gamma,
-    "beta": sp.beta,
+    "beta": _StableBeta,
     "floor": sp.floor,
     "ceiling": sp.ceiling,
     "sin": sp.sin,
@@ -246,6 +391,9 @@ PYTHON_FUNCTIONS = {
     "asin": sp.asin,
     "acos": sp.acos,
     "atan": sp.atan,
+    "acot": sp.acot,
+    "asec": sp.asec,
+    "acsc": sp.acsc,
     "sinh": sp.sinh,
     "cosh": sp.cosh,
     "tanh": sp.tanh,
@@ -259,17 +407,177 @@ PYTHON_FUNCTIONS = {
     "log": sp.log,
     "ln": sp.log,
     "sqrt": sp.sqrt,
+    "sigmoid": _StableSigmoid,
+    "softplus": _StableSoftplus,
+    "relu": lambda value: sp.Max(value, 0),
+    "logit": lambda value: sp.log(value / (1 - value)),
+    "softsign": lambda value: value / (1 + sp.Abs(value)),
+    "swish": _StableSwish,
 }
 
-NUMPY_PRINTER = NumPyPrinter(
-    {
-        "user_functions": {
-            "erf": "numpy.vectorize(math.erf)",
-            "erfc": "numpy.vectorize(math.erfc)",
-            "gamma": "numpy.vectorize(math.gamma)",
-        }
-    }
-)
+class _PythonPrinter(PythonCodePrinter):
+    def _print__StableSigmoid(self, expr: _StableSigmoid) -> str:
+        value = self._print(expr.args[0])
+        return f"(0.5 * (1 + math.tanh(({value}) / 2)))"
+
+    def _print__StableSoftplus(self, expr: _StableSoftplus) -> str:
+        value = self._print(expr.args[0])
+        return f"(max(({value}), 0) + math.log1p(math.exp(-abs({value}))))"
+
+    def _print__StableSwish(self, expr: _StableSwish) -> str:
+        value = self._print(expr.args[0])
+        sigmoid = self._print(_StableSigmoid(expr.args[0]))
+        return f"(({value}) * {sigmoid})"
+
+    def _print__StableBeta(self, expr: _StableBeta) -> str:
+        first, second = (self._print(value) for value in expr.args)
+        sign_first = f"(1 if ({first}) > 0 else math.copysign(1, math.sin(math.pi * ({first}))))"
+        sign_second = f"(1 if ({second}) > 0 else math.copysign(1, math.sin(math.pi * ({second}))))"
+        total = f"(({first}) + ({second}))"
+        sign_total = f"(1 if {total} > 0 else math.copysign(1, math.sin(math.pi * {total})))"
+        log_magnitude = (
+            f"(math.lgamma({first}) + math.lgamma({second}) - math.lgamma({total}))"
+        )
+        return f"(({sign_first}) * ({sign_second}) / ({sign_total}) * math.exp({log_magnitude}))"
+
+
+class _FrameworkPrinter(NumPyPrinter):
+    def __init__(self, backend: Literal["numpy", "torch", "jax"]):
+        self.backend = backend
+        super().__init__(
+            {
+                "user_functions": {
+                    "erf": (
+                        "torch.erf"
+                        if backend == "torch"
+                        else "numpy.vectorize(math.erf)"
+                        if backend == "numpy"
+                        else "jax.scipy.special.erf"
+                    ),
+                    "erfc": (
+                        "torch.special.erfc"
+                        if backend == "torch"
+                        else "numpy.vectorize(math.erfc)"
+                        if backend == "numpy"
+                        else "jax.scipy.special.erfc"
+                    ),
+                    "gamma": (
+                        "torch.special.gamma"
+                        if backend == "torch"
+                        else "numpy.vectorize(math.gamma)"
+                        if backend == "numpy"
+                        else "jax.scipy.special.gamma"
+                    ),
+                }
+            }
+        )
+
+    def _print_gamma(self, expr: sp.Expr) -> str:
+        value = self._print(expr.args[0])
+        if self.backend == "torch":
+            return (
+                f"torch.where(({value}) < 0, "
+                f"torch.sign(torch.sin(torch.pi * ({value}))), 1) "
+                f"* torch.exp(torch.lgamma({value}))"
+            )
+        if self.backend == "numpy":
+            return f"numpy.vectorize(math.gamma)({value})"
+        return f"jax.scipy.special.gamma({value})"
+
+    def _print__StableSigmoid(self, expr: _StableSigmoid) -> str:
+        value = self._print(expr.args[0])
+        if self.backend == "numpy":
+            return f"numpy.exp(-numpy.logaddexp(0, -({value})))"
+        module = "torch" if self.backend == "torch" else "jax.nn"
+        return f"{module}.sigmoid({value})"
+
+    def _print__StableSoftplus(self, expr: _StableSoftplus) -> str:
+        value = self._print(expr.args[0])
+        if self.backend == "numpy":
+            return f"numpy.logaddexp(0, {value})"
+        module = "torch.nn.functional" if self.backend == "torch" else "jax.nn"
+        return f"{module}.softplus({value})"
+
+    def _print__StableSwish(self, expr: _StableSwish) -> str:
+        value = self._print(expr.args[0])
+        return f"({value} * {self._print(_StableSigmoid(expr.args[0]))})"
+
+    def _print__StableBeta(self, expr: _StableBeta) -> str:
+        first, second = (self._print(value) for value in expr.args)
+        total = f"({first} + {second})"
+        if self.backend == "numpy":
+            log_magnitude = (
+                f"numpy.vectorize(math.lgamma)({first})"
+                f" + numpy.vectorize(math.lgamma)({second})"
+                f" - numpy.vectorize(math.lgamma)({total})"
+            )
+            sign = (
+                f"numpy.where({first} < 0, numpy.sign(numpy.sin(numpy.pi * {first})), 1)"
+                f" * numpy.where({second} < 0, numpy.sign(numpy.sin(numpy.pi * {second})), 1)"
+                f" / numpy.where({total} < 0, numpy.sign(numpy.sin(numpy.pi * {total})), 1)"
+            )
+            return f"({sign} * numpy.exp({log_magnitude}))"
+        module = "torch" if self.backend == "torch" else "jnp"
+        if self.backend == "torch":
+            log_gamma = "torch.lgamma"
+            sign_gamma = (
+                lambda value: f"torch.where(({value}) < 0, "
+                f"torch.sign(torch.sin(torch.pi * ({value}))), 1)"
+            )
+        else:
+            log_gamma = "jax.scipy.special.gammaln"
+            sign_gamma = lambda value: f"jax.scipy.special.gammasgn({value})"
+        log_magnitude = (
+            f"{log_gamma}({first}) + {log_gamma}({second}) - {log_gamma}({total})"
+        )
+        sign = f"{sign_gamma(first)} * {sign_gamma(second)} / {sign_gamma(total)}"
+        return f"({sign} * {module}.exp({log_magnitude}))"
+
+    def _print_Piecewise(self, expr: sp.Piecewise) -> str:
+        module = {"numpy": "numpy", "torch": "torch", "jax": "jnp"}[self.backend]
+        default = "float('nan')" if self.backend == "torch" else f"{module}.nan"
+        branches = list(expr.args)
+        for value, condition in reversed(branches):
+            printed_value = self._print(value)
+            if condition is sp.true:
+                default = printed_value
+                continue
+            printed_condition = self._print(condition).replace("numpy.", f"{module}.")
+            default = f"{module}.where({printed_condition}, {printed_value}, {default})"
+        return default
+
+    def _print_Max(self, expr: sp.Max) -> str:
+        return self._print_extreme(expr, "maximum")
+
+    def _print_Min(self, expr: sp.Min) -> str:
+        return self._print_extreme(expr, "minimum")
+
+    def _print_extreme(self, expr: sp.Expr, operation: str) -> str:
+        module = {
+            "numpy": "numpy",
+            "torch": "torch",
+            "jax": "jnp",
+        }[self.backend]
+        args = list(expr.args)
+        if self.backend == "torch":
+            dynamic_args = [arg for arg in args if not arg.is_number]
+            if dynamic_args:
+                first = dynamic_args.pop(0)
+                result = self._print(first).replace("numpy.", "torch.")
+                args.remove(first)
+                for arg in args:
+                    value = self._print(arg).replace("numpy.", "torch.")
+                    if arg.is_number:
+                        value = (
+                            f"torch.as_tensor({value}, dtype={result}.dtype, "
+                            f"device={result}.device)"
+                        )
+                    result = f"torch.{operation}({result}, {value})"
+                return result
+        result = self._print(args[0]).replace("numpy.", f"{module}.")
+        for arg in args[1:]:
+            result = f"{module}.{operation}({result}, {self._print(arg).replace('numpy.', f'{module}.')})"
+        return result
 
 
 def _python_ast_to_sympy(node: ast.AST) -> sp.Expr:
@@ -282,6 +590,8 @@ def _python_ast_to_sympy(node: ast.AST) -> sp.Expr:
             return sp.pi
         if node.id == "e":
             return sp.E
+        if node.id in {"oo", "infty"}:
+            return sp.oo
         return sp.Symbol(node.id)
     if isinstance(node, ast.BinOp):
         left = _python_ast_to_sympy(node.left)
@@ -304,6 +614,14 @@ def _python_ast_to_sympy(node: ast.AST) -> sp.Expr:
             return operand
         if isinstance(node.op, ast.USub):
             return -operand
+        if isinstance(node.op, ast.Not):
+            return sp.Not(operand)
+    if isinstance(node, ast.BoolOp):
+        values = [_python_ast_to_sympy(value) for value in node.values]
+        if isinstance(node.op, ast.And):
+            return sp.And(*values)
+        if isinstance(node.op, ast.Or):
+            return sp.Or(*values)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         function = PYTHON_FUNCTIONS.get(node.func.id)
         if function is not None and not node.keywords:
@@ -325,12 +643,30 @@ def _python_ast_to_sympy(node: ast.AST) -> sp.Expr:
     raise ValueError("Expression contains syntax unsupported by the safe fallback parser.")
 
 
+def _parse_nth_root_expression(latex_str: str) -> sp.Expr | None:
+    """Parses expressions such as \\sqrt[n]{x} into x**(1/n)."""
+    pattern = r"\\sqrt\s*\[(?P<index>.+?)\]\s*\{(?P<argument>.+)\}"
+    match = re.fullmatch(pattern, latex_str.strip(), re.DOTALL)
+    if not match:
+        return None
+
+    index_expr = parse_latex(match.group("index").strip())
+    argument_expr = parse_latex(match.group("argument").strip())
+    return argument_expr ** (1 / index_expr)
+
+
 def _parse_expression(latex_str: str) -> sp.Expr:
     """Parses supported math expressions using SymPy's LaTeX parser and a restricted fallback."""
     normalized = _normalize_latex_string(latex_str)
+    if normalized in {"oo", "infty"}:
+        return sp.oo
+
+    nth_root_expr = _parse_nth_root_expression(normalized)
+    if nth_root_expr is not None:
+        return nth_root_expr
 
     python_signature = re.compile(
-        r"(?:Abs\(|(?<!\\)(?:erf|erfc|gamma|Gamma|beta|floor|ceiling|max|min|sin|cos|tan|cot|sec|csc|asin|acos|atan|sinh|cosh|tanh|coth|sech|csch|asinh|acosh|atanh|exp|log|ln|sqrt)\s*\()"
+        r"(?:Abs\(|(?<!\\)(?:erf|erfc|gamma|Gamma|beta|floor|ceiling|max|min|sin|cos|tan|cot|sec|csc|asin|acos|atan|acot|asec|acsc|sinh|cosh|tanh|coth|sech|csch|asinh|acosh|atanh|exp|log|ln|sqrt|sigmoid|softplus|relu|logit|softsign|swish)\s*\()"
     )
     if python_signature.search(normalized):
         sanitized = normalized
@@ -341,6 +677,9 @@ def _parse_expression(latex_str: str) -> sp.Expr:
             r"\cot": "cot",
             r"\sec": "sec",
             r"\csc": "csc",
+            r"\arccot": "acot",
+            r"\arcsec": "asec",
+            r"\arccsc": "acsc",
             r"\sinh": "sinh",
             r"\cosh": "cosh",
             r"\tanh": "tanh",
@@ -354,6 +693,11 @@ def _parse_expression(latex_str: str) -> sp.Expr:
             r"\log": "log",
             r"\ln": "ln",
             r"\sqrt": "sqrt",
+            r"\approx": "==",
+            r"\equiv": "==",
+            r"\land": " and ",
+            r"\lor": " or ",
+            r"\not": " not ",
             r"\pi": "pi",
             r"\theta": "theta",
             r"\Gamma": "Gamma",
@@ -376,9 +720,9 @@ def _parse_expression(latex_str: str) -> sp.Expr:
 
 
 def _ordered_free_symbols(expr: sp.Expr, raw_latex: str) -> list[str]:
-    """Selects a stable argument order. For binomial expression, maintain the left-to-right variable order from the source form."""
+    """Select a stable argument order. Matrix-like expressions preserve source order; scalar expressions stay alphabetically sorted."""
     free_symbols = [str(symbol) for symbol in expr.free_symbols]
-    if r"\binom" in raw_latex or "binomial" in str(expr):
+    if expr.is_Matrix or r"\binom" in raw_latex or "binomial" in str(expr):
         ordered = []
         seen = set()
         for token in re.findall(r"[A-Za-z_]+", raw_latex):
@@ -398,11 +742,22 @@ def _check_for_undefined_commands(expr: sp.Expr, raw_str: str) -> None:
 
     for cmd in unhandled_commands:
         if cmd not in VALID_LATEX_COMMANDS:
-            raise UnsupportedLaTeXFeatureError(raw_str, cmd)
+            match = difflib.get_close_matches(cmd, VALID_LATEX_COMMANDS, n=1, cutoff=0.65)
+            suggestion = repr(match[0]) if match else None
+            raise UnsupportedLaTeXFeatureError(raw_str, cmd, suggestion=suggestion)
 
     for func in expr.atoms(sp.Function):
         if isinstance(func.func, UndefinedFunction):
-            raise UnsupportedLaTeXFeatureError(raw_str, func.func.__name__, "function")
+            name = func.func.__name__
+            known_functions = set(PYTHON_FUNCTIONS) | set(OPERATORNAME_FUNCTIONS)
+            match = difflib.get_close_matches(name, known_functions, n=1, cutoff=0.65)
+            suggestion = (
+                f"use {match[0]!r} or add support for {name!r}" if match else
+                f"{name!r} is not in the supported function set"
+            )
+            raise UnsupportedLaTeXFeatureError(
+                raw_str, name, "function", suggestion=suggestion
+            )
 
 
 def transpile_latex(
@@ -410,11 +765,22 @@ def transpile_latex(
     function_name: str = "formula",
     type_hints: bool = True,
     use_numpy: bool = False,
+    backend: Literal["python", "numpy", "torch", "jax"] | None = None,
 ) -> str:
-    """Converts a LaTeX string into executable Python function source code."""
+    """Convert LaTeX into Python source targeting Python math, NumPy, PyTorch, or JAX."""
     if not latex_str or not latex_str.strip():
         raise LaTeXTranspilerError("LaTeX expression string cannot be empty.")
     _validate_python_identifier(function_name, "Function name")
+    if backend is None:
+        backend = "numpy" if use_numpy else "python"
+    elif not isinstance(backend, str) or backend not in {"python", "numpy", "torch", "jax"}:
+        raise LaTeXTranspilerError(
+            f"Unknown backend {backend!r}; choose 'python', 'numpy', 'torch', or 'jax'."
+        )
+    if use_numpy and backend != "numpy":
+        raise LaTeXTranspilerError(
+            "use_numpy=True conflicts with an explicit backend; use backend='numpy' instead."
+        )
 
     normalized_latex = _normalize_latex_string(latex_str)
 
@@ -453,17 +819,28 @@ def transpile_latex(
     variables = _ordered_free_symbols(expr, normalized_latex)
     for variable in variables:
         _validate_python_identifier(variable, "Generated argument name")
+    if backend in {"numpy", "torch", "jax"} and expr.has(sp.Piecewise):
+        warnings.warn(
+            "Array-backend piecewise expressions use eager elementwise selection; "
+            "all branch expressions may be evaluated, including branches not selected "
+            "for an element. Keep every branch valid over the full input domain.",
+            PiecewiseEvaluationWarning,
+            stacklevel=2,
+        )
 
     # 3. Build argument signature
+    backend_types = {
+        "python": ("float", "float"),
+        "numpy": ("float | np.ndarray", "np.ndarray" if is_matrix else "float | np.ndarray"),
+        "torch": ("torch.Tensor", "torch.Tensor"),
+        "jax": ("jax.Array", "jax.Array"),
+    }
+    argument_type, return_type = backend_types[backend]
     if type_hints:
-        if is_matrix:
-            argument_type = "float | np.ndarray" if use_numpy else "float"
+        if is_matrix and backend == "numpy":
             return_type = "np.ndarray"
-        elif use_numpy:
-            argument_type = "float | np.ndarray"
-            return_type = "float | np.ndarray"
-        else:
-            argument_type = return_type = "float"
+        elif is_matrix and backend == "python":
+            return_type = "np.ndarray"
         args_str = ", ".join([f"{var}: {argument_type}" for var in variables])
         return_hint = f" -> {return_type}"
     else:
@@ -472,14 +849,57 @@ def transpile_latex(
 
     # 4. Generate Python code representation
     try:
-        if is_matrix:
+        if is_matrix and backend in {"torch", "jax"}:
+            matrix_rows = [
+                "[" + ", ".join(
+                    _FrameworkPrinter(backend).doprint(value).replace(
+                        "numpy.", "torch." if backend == "torch" else "jnp."
+                    )
+                    for value in row
+                ) + "]"
+                for row in expr.tolist()
+            ]
+            if backend == "torch" and variables:
+                like = variables[0]
+                rows_with_tensors = [
+                    "[" + ", ".join(
+                        f"({value} if torch.is_tensor({value}) else "
+                        f"torch.as_tensor({value}, dtype={like}.dtype, device={like}.device))"
+                        for value in row
+                    ) + "]"
+                    for row in expr.tolist()
+                ]
+                python_expr_code = (
+                    "torch.stack([torch.stack(row) for row in ["
+                    + ", ".join(rows_with_tensors)
+                    + "]])"
+                )
+            elif backend == "torch":
+                python_expr_code = f"torch.tensor([{', '.join(matrix_rows)}])"
+            else:
+                python_expr_code = f"jnp.array([{', '.join(matrix_rows)}])"
+        elif is_matrix:
             matrix_list = expr.tolist()
-            python_expr_code = f"np.array({matrix_list})"
-        elif use_numpy:
-            python_expr_code = NUMPY_PRINTER.doprint(expr).replace("numpy.", "np.")
+            python_expr_code = (
+                f"np.array({matrix_list})" if backend == "numpy"
+                else f"np.array({matrix_list})"
+            )
+        elif backend == "numpy":
+            python_expr_code = _FrameworkPrinter("numpy").doprint(expr).replace("numpy.", "np.")
+        elif backend in {"torch", "jax"}:
+            module = "torch" if backend == "torch" else "jnp"
+            printer = _FrameworkPrinter(backend)
+            python_expr_code = printer.doprint(expr).replace("numpy.", f"{module}.")
         else:
-            python_expr_code = sp.pycode(expr)
+            python_expr_code = _PythonPrinter().doprint(expr)
+        if backend in {"torch", "jax"} and "math." in python_expr_code:
+            raise CodeGenerationError(
+                f"The {backend} backend has no differentiable native implementation for "
+                f"part of this expression: {expr}"
+            )
     except Exception as exc:
+        if isinstance(exc, CodeGenerationError):
+            raise
         raise CodeGenerationError(
             f"Unable to generate Python code for parsed expression: {expr}"
         ) from exc
@@ -489,8 +909,18 @@ def transpile_latex(
     if "builtins." in python_expr_code:
         imports_list.append("import builtins")
 
-    if use_numpy or is_matrix or "np." in python_expr_code:
+    if (
+        backend == "numpy"
+        or (backend == "python" and is_matrix)
+        or re.search(r"(?<![A-Za-z0-9_])np\.", python_expr_code)
+    ):
         imports_list.append("import numpy as np")
+    if backend == "torch":
+        imports_list.append("import torch")
+    if backend == "jax":
+        imports_list.extend(("import jax", "import jax.numpy as jnp"))
+        if "jax.scipy.special." in python_expr_code:
+            imports_list.append("import jax.scipy.special")
     if "math." in python_expr_code:
         imports_list.append("import math")
     if "functools." in python_expr_code:

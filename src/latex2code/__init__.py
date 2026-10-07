@@ -3,6 +3,7 @@ from latex2code.core import (
     InvalidLaTeXSyntaxError,
     InvalidPythonIdentifierError,
     LaTeXTranspilerError,
+    PiecewiseEvaluationWarning,
     UnsupportedLaTeXFeatureError,
     transpile_latex,
 )
@@ -15,4 +16,5 @@ __all__ = [
     "InvalidLaTeXSyntaxError",
     "UnsupportedLaTeXFeatureError",
     "InvalidPythonIdentifierError",
+    "PiecewiseEvaluationWarning",
 ]
