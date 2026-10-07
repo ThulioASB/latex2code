@@ -3,7 +3,8 @@ import difflib
 import keyword
 import re
 import warnings
-from typing import Literal
+from dataclasses import dataclass
+from typing import Callable, Literal
 import sympy as sp
 from sympy.core.function import UndefinedFunction
 from sympy.parsing.latex import parse_latex
@@ -56,14 +57,21 @@ class InvalidLaTeXSyntaxError(LaTeXTranspilerError):
         raw_expression: str,
         original_error: Exception | None = None,
         hint: str | None = None,
+        location: tuple[int, int] | None = None,
     ):
         self.raw_expression = raw_expression
         self.original_error = original_error
         hint = hint or _syntax_hint(raw_expression)
+        self.line, self.column = location or _syntax_location(raw_expression, original_error)
         message = (
             f"Failed to parse LaTeX expression: '{raw_expression}'. "
             "Please verify the expression syntax and supported LaTeX subset."
         )
+        if self.line is not None and self.column is not None:
+            message += (
+                f" Location: line {self.line}, column {self.column}."
+                f"\n{_source_context(raw_expression, self.line, self.column)}"
+            )
         if hint:
             message += f" Hint: {hint}"
         super().__init__(message)
@@ -83,7 +91,20 @@ class UnsupportedLaTeXFeatureError(InvalidLaTeXSyntaxError):
         self.original_error = None
         self.feature = feature
         self.kind = kind
+        location_index = raw_expression.find(feature)
+        if location_index < 0 and feature.startswith("\\"):
+            location_index = raw_expression.find(feature[1:])
+        self.line, self.column = (
+            _line_and_column(raw_expression, location_index)
+            if location_index >= 0
+            else (None, None)
+        )
         message = f"Unsupported {kind}: {feature}."
+        if self.line is not None and self.column is not None:
+            message += (
+                f" Location: line {self.line}, column {self.column}."
+                f"\n{_source_context(raw_expression, self.line, self.column)}"
+            )
         if suggestion:
             message += f" Did you mean {suggestion}?"
         LaTeXTranspilerError.__init__(self, message)
@@ -97,6 +118,104 @@ class PiecewiseEvaluationWarning(UserWarning):
     """Warns when array backends eagerly evaluate all branches of a piecewise expression."""
 
 
+@dataclass(frozen=True)
+class TranspilationInfo:
+    """Parsed expression and generated source returned by :func:`inspect_latex`."""
+
+    input_expression: str
+    backend: str
+    parsed_expression: str
+    variables: tuple[str, ...]
+    generated_code: str
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CompiledFormula:
+    """Callable generated formula together with its source and inspection details."""
+
+    info: TranspilationInfo
+    function: Callable[..., object]
+
+    def __call__(self, *args: object, **kwargs: object) -> object:
+        return self.function(*args, **kwargs)
+
+    @property
+    def source(self) -> str:
+        return self.info.generated_code
+
+
+def _line_and_column(expression: str, offset: int) -> tuple[int, int]:
+    line = expression.count("\n", 0, offset) + 1
+    line_start = expression.rfind("\n", 0, offset) + 1
+    return line, offset - line_start + 1
+
+
+def _source_context(expression: str, line: int, column: int) -> str:
+    lines = expression.splitlines() or [expression]
+    source_line = lines[line - 1] if line <= len(lines) else ""
+    start = max(0, column - 61)
+    end = min(len(source_line), start + 120)
+    prefix = "..." if start else ""
+    suffix = "..." if end < len(source_line) else ""
+    line_prefix = source_line[start : column - 1]
+    caret = " " * (len(prefix) + len(line_prefix.expandtabs())) + "^"
+    return f"  {prefix}{source_line[start:end]}{suffix}\n  {caret}"
+
+
+def _syntax_location(
+    expression: str,
+    original_error: Exception | None,
+) -> tuple[int | None, int | None]:
+    delimiters = {"(": ")", "[": "]", "{": "}"}
+    stack: list[tuple[str, int]] = []
+    for index, character in enumerate(expression):
+        if character in delimiters or character in delimiters.values():
+            backslashes = 0
+            previous = index - 1
+            while previous >= 0 and expression[previous] == "\\":
+                backslashes += 1
+                previous -= 1
+            if backslashes % 2:
+                continue
+            if character in delimiters:
+                stack.append((character, index))
+            elif not stack or delimiters[stack[-1][0]] != character:
+                return _line_and_column(expression, index)
+            else:
+                stack.pop()
+    if stack:
+        return _line_and_column(expression, stack[0][1])
+
+    begins = list(re.finditer(r"\\begin\{([^}]+)\}", expression))
+    endings = list(re.finditer(r"\\end\{([^}]+)\}", expression))
+    begin_names = [match.group(1) for match in begins]
+    ending_names = [match.group(1) for match in endings]
+    if begin_names != ending_names:
+        for begin, ending in zip(begins, endings):
+            if begin.group(1) != ending.group(1):
+                return _line_and_column(expression, begin.start())
+        if len(begins) > len(endings):
+            return _line_and_column(expression, begins[len(endings)].start())
+        if endings:
+            return _line_and_column(expression, endings[0].start())
+
+    if original_error is not None:
+        match = re.search(r"\n([^\n]*)\n([~ ]*)\^", str(original_error))
+        if match:
+            excerpt = match.group(1)
+            for line_number, source_line in enumerate(expression.splitlines(), start=1):
+                if source_line.strip() == excerpt.strip():
+                    return line_number, len(match.group(2)) + 1
+        trailing_operator = re.search(r"[+*/^=<>-]\s*$", expression)
+        if trailing_operator:
+            return _line_and_column(expression, len(expression.rstrip()))
+        repeated_operator = re.search(r"[+*/^=<>]\s*([*/^=<>])", expression)
+        if repeated_operator:
+            return _line_and_column(expression, repeated_operator.start(1))
+    return None, None
+
+
 def _syntax_hint(expression: str) -> str | None:
     for opening, closing, label in (("{", "}", "curly braces"), ("(", ")", "parentheses"), ("[", "]", "square brackets")):
         if expression.count(opening) != expression.count(closing):
@@ -106,6 +225,10 @@ def _syntax_hint(expression: str) -> str | None:
     endings = re.findall(r"\\end\{([^}]+)\}", expression)
     if environments != endings:
         return "Make sure each \\begin{...} has a matching \\end{...} of the same environment."
+    if re.search(r"[+*/^=<>-]\s*$", expression):
+        return "The expression ends with an operator; add the missing operand or remove the operator."
+    if re.search(r"[+*/^=<>]\s*[*/^=<>]", expression):
+        return "Check for consecutive operators that do not form a valid expression."
     return None
 
 
@@ -284,7 +407,7 @@ def _parse_operatorname_expression(latex_str: str) -> sp.Expr:
             expression[: match.start()] + replacement_name + expression[close_index + 1 :]
         )
 
-    parsed = parse_latex(expression)
+    parsed = parse_latex(expression, strict=True)
     for symbol_name, value in replacements.items():
         parsed = parsed.subs(sp.Symbol(symbol_name), value)
     return parsed
@@ -305,8 +428,13 @@ def _parse_matrix_environment(latex_str: str) -> sp.Matrix | None:
     rows = [row.strip() for row in re.split(r"\\\\{1,2}", content) if row.strip()]
 
     matrix_rows = []
+    row_offsets = []
+    content_offset = match.start("content")
+    search_from = 0
     try:
         for row in rows:
+            row_start = content.find(row, search_from)
+            search_from = row_start + len(row)
             elements = []
             for elem in [segment.strip() for segment in row.split("&")]:
                 if not elem:
@@ -318,16 +446,27 @@ def _parse_matrix_environment(latex_str: str) -> sp.Matrix | None:
                 elements.append(elem)
             if not elements:
                 continue
-            parsed_elements = [parse_latex(elem) for elem in elements if elem]
+            parsed_elements = [parse_latex(elem, strict=True) for elem in elements if elem]
             if not parsed_elements:
                 continue
             matrix_rows.append(parsed_elements)
+            row_offsets.append(content_offset + row_start)
         if not matrix_rows:
             return None
-        if len({len(row) for row in matrix_rows}) != 1:
+        expected_width = len(matrix_rows[0])
+        inconsistent_row = next(
+            (
+                index
+                for index, row in enumerate(matrix_rows[1:], start=1)
+                if len(row) != expected_width
+            ),
+            None,
+        )
+        if inconsistent_row is not None:
             raise InvalidLaTeXSyntaxError(
                 latex_str,
                 hint="Every row in a matrix or array must contain the same number of entries.",
+                location=_line_and_column(latex_str, row_offsets[inconsistent_row]),
             )
         return sp.Matrix(matrix_rows)
     except InvalidLaTeXSyntaxError:
@@ -357,8 +496,12 @@ def _parse_cases_environment(latex_str: str) -> sp.Expr | None:
                     hint="Each cases row must separate its value and condition with '&'.",
                 )
             expr_part, cond_part = [segment.strip() for segment in row.split("&", 1)]
-            expr = parse_latex(expr_part)
-            cond = parse_latex(cond_part) if cond_part.lower() not in {"otherwise", "else"} else True
+            expr = parse_latex(expr_part, strict=True)
+            cond = (
+                parse_latex(cond_part, strict=True)
+                if cond_part.lower() not in {"otherwise", "else"}
+                else True
+            )
             pieces.append((expr, cond))
         if not pieces:
             return None
@@ -650,8 +793,8 @@ def _parse_nth_root_expression(latex_str: str) -> sp.Expr | None:
     if not match:
         return None
 
-    index_expr = parse_latex(match.group("index").strip())
-    argument_expr = parse_latex(match.group("argument").strip())
+    index_expr = parse_latex(match.group("index").strip(), strict=True)
+    argument_expr = parse_latex(match.group("argument").strip(), strict=True)
     return argument_expr ** (1 / index_expr)
 
 
@@ -716,7 +859,7 @@ def _parse_expression(latex_str: str) -> sp.Expr:
         parsed = ast.parse(sanitized, mode="eval")
         return _python_ast_to_sympy(parsed)
 
-    return parse_latex(normalized)
+    return parse_latex(normalized, strict=True)
 
 
 def _ordered_free_symbols(expr: sp.Expr, raw_latex: str) -> list[str]:
@@ -760,14 +903,14 @@ def _check_for_undefined_commands(expr: sp.Expr, raw_str: str) -> None:
             )
 
 
-def transpile_latex(
+def _transpile_latex(
     latex_str: str,
     function_name: str = "formula",
     type_hints: bool = True,
     use_numpy: bool = False,
     backend: Literal["python", "numpy", "torch", "jax"] | None = None,
-) -> str:
-    """Convert LaTeX into Python source targeting Python math, NumPy, PyTorch, or JAX."""
+) -> TranspilationInfo:
+    """Build generated source and inspection details from a LaTeX expression."""
     if not latex_str or not latex_str.strip():
         raise LaTeXTranspilerError("LaTeX expression string cannot be empty.")
     _validate_python_identifier(function_name, "Function name")
@@ -815,15 +958,22 @@ def transpile_latex(
     except Exception as exc:
         raise InvalidLaTeXSyntaxError(latex_str, original_error=exc) from exc
 
+    expr = expr.subs({sp.Symbol("pi"): sp.pi, sp.Symbol("e"): sp.E})
+
     # 2. Extract free variables
     variables = _ordered_free_symbols(expr, normalized_latex)
+    transpilation_warnings = []
     for variable in variables:
         _validate_python_identifier(variable, "Generated argument name")
     if backend in {"numpy", "torch", "jax"} and expr.has(sp.Piecewise):
-        warnings.warn(
+        warning_message = (
             "Array-backend piecewise expressions use eager elementwise selection; "
             "all branch expressions may be evaluated, including branches not selected "
-            "for an element. Keep every branch valid over the full input domain.",
+            "for an element. Keep every branch valid over the full input domain."
+        )
+        transpilation_warnings.append(warning_message)
+        warnings.warn(
+            warning_message,
             PiecewiseEvaluationWarning,
             stacklevel=2,
         )
@@ -934,4 +1084,60 @@ def transpile_latex(
     code = f"{imports}def {function_name}({args_str}){return_hint}:\n"
     code += f"    return {python_expr_code}\n"
 
-    return code
+    return TranspilationInfo(
+        input_expression=latex_str,
+        backend=backend,
+        parsed_expression=str(expr),
+        variables=tuple(variables),
+        generated_code=code,
+        warnings=tuple(transpilation_warnings),
+    )
+
+
+def transpile_latex(
+    latex_str: str,
+    function_name: str = "formula",
+    type_hints: bool = True,
+    use_numpy: bool = False,
+    backend: Literal["python", "numpy", "torch", "jax"] | None = None,
+) -> str:
+    """Convert LaTeX into Python source targeting Python math, NumPy, PyTorch, or JAX."""
+    return _transpile_latex(
+        latex_str, function_name, type_hints, use_numpy, backend
+    ).generated_code
+
+
+def inspect_latex(
+    latex_str: str,
+    function_name: str = "formula",
+    type_hints: bool = True,
+    use_numpy: bool = False,
+    backend: Literal["python", "numpy", "torch", "jax"] | None = None,
+) -> TranspilationInfo:
+    """Return the parsed expression, variables, warnings, and generated source."""
+    return _transpile_latex(latex_str, function_name, type_hints, use_numpy, backend)
+
+
+def compile_latex(
+    latex_str: str,
+    function_name: str = "formula",
+    type_hints: bool = True,
+    use_numpy: bool = False,
+    backend: Literal["python", "numpy", "torch", "jax"] | None = None,
+) -> CompiledFormula:
+    """Compile LaTeX into a callable and retain its generated source and metadata."""
+    info = inspect_latex(
+        latex_str,
+        function_name=function_name,
+        type_hints=type_hints,
+        use_numpy=use_numpy,
+        backend=backend,
+    )
+    namespace: dict[str, object] = {}
+    exec(info.generated_code, namespace)
+    function = namespace[function_name]
+    if not callable(function):
+        raise CodeGenerationError(
+            f"Generated object {function_name!r} is not callable."
+        )
+    return CompiledFormula(info=info, function=function)

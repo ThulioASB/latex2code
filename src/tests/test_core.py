@@ -1,8 +1,9 @@
+import json
 from io import StringIO
 import math
 import numpy as np
 import pytest
-from latex2code import transpile_latex
+from latex2code import __version__, compile_latex, inspect_latex, transpile_latex
 from latex2code.core import (
     CodeGenerationError,
     InvalidLaTeXSyntaxError,
@@ -21,18 +22,82 @@ def test_simple_fraction():
     assert scope["formula"](10, 2) == 5.0
 
 
-def test_greek_symbols_with_explicit_numeric_values():
+def test_pi_is_a_constant_and_greek_symbols_are_variables():
     code = transpile_latex(r"\pi \cdot \theta", type_hints=False)
     scope = {}
     exec(code, scope)
-    assert math.isclose(scope["formula"](math.pi, 2.0), 2.0 * math.pi)
+    assert "def formula(theta):" in code
+    assert math.isclose(scope["formula"](2.0), 2.0 * math.pi)
+
+
+@pytest.mark.parametrize("backend", ["python", "numpy"])
+def test_standard_constants_are_numeric_and_greek_variables_remain_arguments(backend):
+    code = transpile_latex(r"\pi + e + \theta", backend=backend, type_hints=False)
+    scope = {}
+    exec(code, scope)
+
+    assert "def formula(theta):" in code
+    assert math.isclose(scope["formula"](2.5), math.pi + math.e + 2.5)
+
+
+def test_inspection_api_reports_expression_variables_warnings_and_source():
+    with pytest.warns(PiecewiseEvaluationWarning):
+        details = inspect_latex(
+            r"\begin{cases} \pi x & x > 0 \\ e & x \le 0 \end{cases}",
+            backend="numpy",
+            type_hints=False,
+        )
+
+    assert details.parsed_expression.startswith("Piecewise(")
+    assert details.input_expression.startswith(r"\begin{cases}")
+    assert details.backend == "numpy"
+    assert details.variables == ("x",)
+    assert len(details.warnings) == 1
+    assert "eager elementwise selection" in details.warnings[0]
+    assert "def formula(x):" in details.generated_code
+    assert "np.pi" in details.generated_code
+
+
+def test_compile_api_returns_callable_with_reusable_source_and_metadata():
+    compiled = compile_latex(r"\pi x + \theta", function_name="model", type_hints=False)
+
+    assert compiled(theta=0.5, x=2.0) == 2 * math.pi + 0.5
+    assert compiled.function(theta=0.5, x=2.0) == compiled(theta=0.5, x=2.0)
+    assert compiled.info.variables == ("theta", "x")
+    assert compiled.source == compiled.info.generated_code
+    assert "def model(theta, x):" in compiled.source
+
+
+def test_compile_api_supports_numpy_arrays():
+    compiled = compile_latex(r"\sin(x) + x^2", backend="numpy", type_hints=False)
+    values = np.asarray([0.0, 0.5, 1.0])
+
+    assert np.allclose(compiled(values), np.sin(values) + values**2)
+
+
+@pytest.mark.parametrize("backend", ["torch", "jax"])
+def test_compile_api_preserves_framework_autodiff(backend):
+    if backend == "torch":
+        torch = pytest.importorskip("torch")
+        compiled = compile_latex(r"\sin(x) + x^2", backend=backend, type_hints=False)
+        value = torch.tensor(0.5, requires_grad=True)
+        result = compiled(value)
+        result.backward()
+        assert math.isclose(value.grad.item(), math.cos(0.5) + 1, rel_tol=1e-6)
+    else:
+        jax = pytest.importorskip("jax")
+        jax_numpy = pytest.importorskip("jax.numpy")
+        compiled = compile_latex(r"\sin(x) + x^2", backend=backend, type_hints=False)
+        value = jax_numpy.asarray(0.5)
+        gradient = jax.grad(compiled)(value)
+        assert math.isclose(float(gradient), math.cos(0.5) + 1, rel_tol=1e-6)
 
 
 def test_trigonometric_expression_matches_expected_value():
     code = transpile_latex(r"\sin(\pi x) + \theta", type_hints=False)
     scope = {}
     exec(code, scope)
-    result = scope["formula"](math.pi, 2.0, 0.5)
+    result = scope["formula"](2.0, 0.5)
     assert math.isclose(result, math.sin(math.pi * 0.5) + 2.0)
 
 
@@ -83,6 +148,32 @@ def test_numpy_mode_vectorizes_math_functions(latex, values, expected):
     scope = {}
     exec(code, scope)
     assert np.allclose(scope["formula"](*values), expected)
+
+
+@pytest.mark.parametrize("operator", ["erf", "erfc", "gamma"])
+@pytest.mark.parametrize("backend", ["python", "numpy"])
+def test_python_and_numpy_special_functions_match_reference_values(operator, backend):
+    values = [-1.5, -0.5, 0.5, 1.5, 5.0]
+    reference = {
+        "erf": math.erf,
+        "erfc": math.erfc,
+        "gamma": math.gamma,
+    }[operator]
+    expected = [reference(value) for value in values]
+    code = transpile_latex(
+        rf"\operatorname{{{operator}}}(x)",
+        backend=backend,
+        type_hints=False,
+    )
+    scope = {}
+    exec(code, scope)
+
+    if backend == "python":
+        actual = [scope["formula"](value) for value in values]
+    else:
+        actual = scope["formula"](np.asarray(values))
+
+    assert np.allclose(actual, expected, rtol=1e-12, atol=1e-12)
 
 
 def test_numpy_piecewise_works_with_array_inputs():
@@ -183,6 +274,69 @@ def test_jax_backend_matches_scalar_and_array_values_and_gradients():
     array_result = formula(values)
     expected = jax_numpy.sin(values) ** 2 + values
     assert jax_numpy.allclose(array_result, expected)
+
+
+@pytest.mark.parametrize("backend", ["python", "numpy", "torch", "jax"])
+def test_multivariable_scientific_expression_matches_values_and_gradients(backend):
+    if backend == "torch":
+        torch = pytest.importorskip("torch")
+    elif backend == "jax":
+        jax = pytest.importorskip("jax")
+        jax_numpy = pytest.importorskip("jax.numpy")
+
+    code = transpile_latex(r"\frac{\sin(x)}{x} + \sqrt{y}", backend=backend, type_hints=False)
+    scope = {}
+    exec(code, scope)
+    formula = scope["formula"]
+
+    x_values = [0.2, 0.7, 1.4]
+    y_values = [0.25, 1.0, 2.25]
+    expected = [
+        math.sin(x) / x + math.sqrt(y)
+        for x, y in zip(x_values, y_values)
+    ]
+
+    if backend == "python":
+        actual = [formula(x, y) for x, y in zip(x_values, y_values)]
+    elif backend == "numpy":
+        actual = formula(np.array(x_values), np.array(y_values))
+    elif backend == "torch":
+        x = torch.tensor(x_values, requires_grad=True)
+        y = torch.tensor(y_values, requires_grad=True)
+        actual = formula(x, y)
+        actual.sum().backward()
+        expected_x_gradient = [
+            (x * math.cos(x) - math.sin(x)) / x**2
+            for x in x_values
+        ]
+        expected_y_gradient = [1 / (2 * math.sqrt(y)) for y in y_values]
+        assert torch.allclose(x.grad, torch.tensor(expected_x_gradient), rtol=1e-5, atol=1e-6)
+        assert torch.allclose(y.grad, torch.tensor(expected_y_gradient), rtol=1e-5, atol=1e-6)
+    else:
+        x = jax_numpy.asarray(x_values)
+        y = jax_numpy.asarray(y_values)
+        actual = formula(x, y)
+        x_gradient, y_gradient = jax.grad(
+            lambda xs, ys: jax_numpy.sum(formula(xs, ys)),
+            argnums=(0, 1),
+        )(x, y)
+        expected_x_gradient = jax_numpy.asarray([
+            (value * math.cos(value) - math.sin(value)) / value**2
+            for value in x_values
+        ])
+        expected_y_gradient = jax_numpy.asarray([
+            1 / (2 * math.sqrt(value))
+            for value in y_values
+        ])
+        assert jax_numpy.allclose(x_gradient, expected_x_gradient, rtol=1e-5, atol=1e-6)
+        assert jax_numpy.allclose(y_gradient, expected_y_gradient, rtol=1e-5, atol=1e-6)
+
+    if backend == "torch":
+        assert torch.allclose(actual.detach(), torch.tensor(expected), rtol=1e-6, atol=1e-7)
+    elif backend == "jax":
+        assert jax_numpy.allclose(actual, jax_numpy.asarray(expected), rtol=1e-6, atol=1e-7)
+    else:
+        assert np.allclose(np.asarray(actual), expected, rtol=1e-6, atol=1e-7)
 
 
 @pytest.mark.parametrize("backend", ["torch", "jax"])
@@ -524,10 +678,48 @@ def test_unsupported_commands_and_functions_have_specific_errors():
 
 
 def test_diagnostics_suggest_close_command_and_function_names():
-    with pytest.raises(UnsupportedLaTeXFeatureError, match=r"Did you mean '\\\\sin'"):
-        transpile_latex(r"\sinn(x)")
+    with pytest.raises(UnsupportedLaTeXFeatureError, match=r"Did you mean '\\\\sin'") as error:
+        transpile_latex("x +\n  \\sinn(y)")
+    assert error.value.line == 2
+    assert error.value.column == 3
+    assert "\\sinn(y)" in str(error.value)
     with pytest.raises(UnsupportedLaTeXFeatureError, match="sigmoid"):
         transpile_latex(r"\operatorname{sigmiod}(x)")
+
+
+def test_syntax_error_reports_unmatched_delimiter_location():
+    expression = r"\frac{x}{2"
+    with pytest.raises(InvalidLaTeXSyntaxError, match="Location: line 1, column 9") as error:
+        transpile_latex(expression)
+
+    assert error.value.line == 1
+    assert error.value.column == 9
+    assert "  \\frac{x}{2\n          ^" in str(error.value)
+    assert "curly braces are balanced" in str(error.value)
+
+
+def test_syntax_error_reports_multiline_environment_location():
+    expression = "\\begin{pmatrix}\n  x & y\n\\end{bmatrix}"
+    with pytest.raises(InvalidLaTeXSyntaxError, match="Location: line 1, column 1") as error:
+        transpile_latex(expression)
+
+    assert error.value.line == 1
+    assert error.value.column == 1
+
+
+@pytest.mark.parametrize(
+    ("expression", "line", "column", "hint"),
+    [
+        ("x +", 1, 4, "ends with an operator"),
+        ("x + * y", 1, 5, "consecutive operators"),
+    ],
+)
+def test_strict_parser_reports_common_expression_typos(expression, line, column, hint):
+    with pytest.raises(InvalidLaTeXSyntaxError) as error:
+        transpile_latex(expression)
+
+    assert (error.value.line, error.value.column) == (line, column)
+    assert hint in str(error.value)
 
 
 def test_safe_fallback_rejects_non_math_python_syntax():
@@ -536,8 +728,9 @@ def test_safe_fallback_rejects_non_math_python_syntax():
 
 
 def test_matrix_rows_must_have_matching_dimensions():
-    with pytest.raises(InvalidLaTeXSyntaxError, match="same number of entries"):
+    with pytest.raises(InvalidLaTeXSyntaxError, match=r"Location: line 1, column 25") as error:
         transpile_latex(r"\begin{pmatrix} x & y \\ z \end{pmatrix}")
+    assert "same number of entries" in str(error.value)
 
 
 @pytest.mark.parametrize(
@@ -566,6 +759,33 @@ def test_cli_reads_latex_from_stdin(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "def stdin_formula(x: float) -> float:" in output
     assert "return x/2" in output
+
+
+def test_cli_inspect_prints_json_report(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["latex2code", r"\pi + \theta", "--inspect", "--no-types"],
+    )
+
+    cli_main()
+
+    report = json.loads(capsys.readouterr().out)
+    assert report["parsed_expression"] == "theta + pi"
+    assert report["variables"] == ["theta"]
+    assert "math.pi" in report["generated_code"]
+    assert report["warnings"] == []
+
+
+def test_cli_inspect_rejects_output_file_option(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["latex2code", "x", "--inspect", "--output", "generated.py"],
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli_main()
+
+    assert error.value.code == 2
 
 
 def test_cli_writes_generated_source_to_file(monkeypatch, capsys, tmp_path):
@@ -652,7 +872,7 @@ def test_cli_supports_version_flag(monkeypatch, capsys):
     with pytest.raises(SystemExit) as error:
         cli_main()
     assert error.value.code == 0
-    assert "latex2code 0.2.0" in capsys.readouterr().out
+    assert f"latex2code {__version__}" in capsys.readouterr().out
 
 
 def test_infinity_constant_and_hypot_operator_are_supported():

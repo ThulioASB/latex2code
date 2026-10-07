@@ -13,7 +13,7 @@ Designed for scientific computing, machine learning researchers, and engineers w
 ## Features
 
 - 📐 **Common Math:** Translates arithmetic, fractions, powers, roots, limits, binomial coefficients, and common functions such as `\sin`, `\cos`, `\tan`, `\exp`, `\log`, `\operatorname{erf}`, `\max`, and hyperbolic functions.
-- 🔢 **Greek Symbols:** Supports common Greek-letter commands as symbols in expressions.
+- 🔢 **Greek Symbols & Constants:** Common Greek-letter commands become variables; `\pi` and `e` are numeric constants.
 - 🔁 **Matrix & Array Support:** Converts LaTeX matrix environments (`\begin{pmatrix}`, `\begin{bmatrix}`, `\begin{matrix}`) and tabular/array layouts like `\begin{array}{cc} ... \end{array}` into `numpy.ndarray` objects.
 - 🧩 **Piecewise Expressions:** Recognizes `\begin{cases} ... \end{cases}` and emits Python conditional expressions.
 - 🔒 **Absolute Values & Floor/Ceiling:** Handles common wrappers like `\left|x\right|`, `\left\lfloor x \right\rfloor`, and `\left\lceil x \right\rceil`.
@@ -21,6 +21,7 @@ Designed for scientific computing, machine learning researchers, and engineers w
 - 📐 **Extended Trig & Inverse Functions:** Supports reciprocal and inverse trig functions such as `\csc`, `\arccot`, `\arcsec`, and `\arccsc`.
 - 🤖 **Machine-Learning Functions:** Supports `\operatorname{sigmoid}(x)`, `\operatorname{relu}(x)`, `\operatorname{softplus}(x)`, `\operatorname{logit}(x)`, `\operatorname{softsign}(x)`, and `\operatorname{swish}(x)` in scalar, NumPy, PyTorch, and JAX modes.
 - 🏷️ **Type Annotations:** Automatically generates functions with PEP 484 type hints.
+- 🔍 **Inspection Reports:** Shows the parsed symbolic expression, variables, warnings, and generated Python source.
 - 💻 **Command Line Interface:** Transpiles formulas directly from your terminal and accepts input from stdin.
 
 This is a focused expression transpiler, not a complete LaTeX implementation or a computer algebra system.
@@ -72,16 +73,55 @@ def calculate_wave(x: float, y: float, z: float) -> float:
 
 ```
 
-### Greek Symbols
+For direct evaluation in a notebook or application, use `compile_latex`. The returned object is
+callable and retains the generated source and inspection details:
+
+```python
+from latex2code import compile_latex
+
+formula = compile_latex(r"\sin(x) + x^2")
+print(formula(0.5))
+print(formula.info.variables)
+print(formula.source)
+```
+
+Choose a backend just as with `transpile_latex`; optional frameworks must be installed when
+compiling a formula for that backend. The callable uses only the arguments supplied by the caller
+and does not automatically move or cast array/tensor inputs.
+
+### Constants and Greek Variables
 
 ```python
 from latex2code import transpile_latex
 
-code = transpile_latex(r"\sin(\pi x) + \theta", function_name="signal_response")
+code = transpile_latex(r"\sin(\pi x) + e + \theta", function_name="signal_response")
 print(code)
 ```
 
-Greek-letter commands can become function arguments. For example, `\pi` is not guaranteed to be treated as the built-in numeric constant; pass the desired value (such as `math.pi`) as an argument when it appears as a symbol.
+Standard constants `\pi` and `e` are emitted as numeric constants and are not function arguments. Other Greek-letter symbols such as `\theta` remain variables and appear in the generated function signature.
+
+### Inspecting a Transpilation
+
+Use the inspection API to check how an expression was interpreted before using its generated source:
+
+```python
+from latex2code import inspect_latex
+
+details = inspect_latex(r"\sin(\pi x) + \theta")
+print(details.input_expression)
+print(details.backend)
+print(details.parsed_expression)
+print(details.variables)
+print(details.generated_code)
+print(details.warnings)
+```
+
+The CLI's `--inspect` option prints the same information as JSON. Parse and unsupported-feature
+errors include a line and column with a short source excerpt when the location can be identified:
+
+```powershell
+latex2code "\sin(\pi x) + \theta" --inspect
+```
 
 ### Matrix Transpilation
 
@@ -245,6 +285,7 @@ latex2code "\sin(x)^2 + x" --backend jax --output differentiable.py
 `--numpy` remains available as a legacy alias for `--backend numpy`. Generated source for
 PyTorch/JAX imports the selected framework, so install that framework in the environment where the
 generated file will run.
+Use `--inspect` to print a JSON report with the parsed expression, function variables, warnings, and source.
 
 ### Options
 
@@ -255,6 +296,7 @@ generated file will run.
 | `-p` | `--numpy` | Force generation with NumPy functions/arrays. |
 |  | `--backend` | Select `python`, `numpy`, `torch`, or `jax` output (default: `python`). |
 | `-o` | `--output` | Write generated Python source to a file instead of stdout. |
+|  | `--inspect` | Print JSON containing the parsed expression, variables, warnings, and generated source. |
 
 ---
 
@@ -279,11 +321,11 @@ pytest
 | Arrays and cases | Matrix/array layouts, `cases`, selected aligned equation layouts | Aligned equations are represented as rows of values, not solved as systems. |
 | Backends | Python math, NumPy, PyTorch, JAX | PyTorch and JAX are optional runtime dependencies; expressions without a native differentiable implementation are rejected rather than silently falling back to Python math. |
 
-- Input is parsed by SymPy's LaTeX parser plus a restricted safe fallback. Document markup, arbitrary TeX macros, and arbitrary custom functions are outside scope.
-- Unsupported commands and functions raise `UnsupportedLaTeXFeatureError`; close command/function spellings are suggested when possible. Malformed input raises `InvalidLaTeXSyntaxError`, which includes delimiter or environment hints when detected.
+- Input is parsed strictly by SymPy's LaTeX parser plus a restricted safe fallback, so malformed trailing tokens are rejected rather than silently discarded. Document markup, arbitrary TeX macros, and arbitrary custom functions are outside scope.
+- Unsupported commands and functions raise `UnsupportedLaTeXFeatureError`; close command/function spellings are suggested when possible. Malformed input raises `InvalidLaTeXSyntaxError`, which includes a source location and excerpt when identifiable, plus delimiter or environment hints when detected.
 - For example, a misspelled `\sinn(x)` reports the likely `\sin` command, while a fraction with an unmatched brace points out the unbalanced delimiters.
 - Piecewise cases without an explicit default remain undefined outside their listed conditions; generated Python returns `None` there, while NumPy mode represents those values as `numpy.nan`.
-- Greek symbols may become function parameters rather than built-in constants. Inspect the generated signature and provide the intended values.
+- `\pi` and `e` are numeric constants; other Greek symbols may become function parameters. Use `inspect_latex` or CLI `--inspect` to review parsed variables and generated code.
 - Derivatives and integrals are evaluated symbolically when SymPy can do so. An indefinite integral returns one antiderivative and does not add the arbitrary constant of integration.
 - Finite sums are emitted as executable Python sum expressions. Matrices use the selected array backend (Python's matrix output remains a NumPy array for compatibility).
 - Finite products are symbolically evaluated when SymPy can reduce them; unresolved symbolic products raise `CodeGenerationError` rather than returning incomplete Python.

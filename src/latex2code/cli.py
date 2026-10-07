@@ -1,7 +1,10 @@
 import argparse
+import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
-from latex2code.core import LaTeXTranspilerError, transpile_latex
+from latex2code import __version__
+from latex2code.core import LaTeXTranspilerError, inspect_latex, transpile_latex
 
 
 def main():
@@ -17,7 +20,7 @@ def main():
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 0.2.0",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "-n",
@@ -48,30 +51,40 @@ def main():
         type=Path,
         help="Write generated Python source to this file instead of stdout",
     )
+    parser.add_argument(
+        "--inspect",
+        action="store_true",
+        help="Print a JSON report with the parsed expression, variables, warnings, and code",
+    )
 
     args = parser.parse_args()
 
     if args.latex is None:
         parser.error("the following arguments are required: latex")
+    if args.inspect and args.output:
+        parser.error("--inspect cannot be combined with --output")
 
     latex_input = args.latex
     if latex_input == "-":
         latex_input = sys.stdin.read().strip()
 
     try:
-        code = transpile_latex(
+        transpile = inspect_latex if args.inspect else transpile_latex
+        result = transpile(
             latex_input,
             function_name=args.name,
             type_hints=not args.no_types,
             use_numpy=args.numpy,
             backend=args.backend,
         )
-        if args.output:
+        if args.inspect:
+            print(json.dumps(asdict(result), indent=2))
+        elif args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(code, encoding="utf-8")
+            args.output.write_text(result, encoding="utf-8")
         else:
             print("\n# Generated Python Code:")
-            print(code)
+            print(result)
     except LaTeXTranspilerError as err:
         print(f"\n[Error] {err}", file=sys.stderr)
         sys.exit(1)
