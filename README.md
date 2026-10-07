@@ -76,6 +76,19 @@ def calculate_wave(x: float, y: float, z: float) -> float:
 For direct evaluation in a notebook or application, use `compile_latex`. The returned object is
 callable and retains the generated source and inspection details:
 
+```python
+import numpy as np
+from latex2code import compile_latex
+
+formula = compile_latex(
+    r"\frac{\sin(x)}{\sqrt{x^2 + 1}}",
+    backend="numpy",
+)
+
+x = np.linspace(0, 10, 100)
+result = formula(x)
+```
+
 The convenience helper `latex_to_code` accepts the same generation options as the main transpiler
 while keeping support for legacy macro overrides such as `custom_symbol_map`:
 
@@ -89,15 +102,6 @@ code = latex_to_code(
     type_hints=False,
 )
 print(code)
-```
-
-```python
-from latex2code import compile_latex
-
-formula = compile_latex(r"\sin(x) + x^2")
-print(formula(0.5))
-print(formula.info.variables)
-print(formula.source)
 ```
 
 Choose a backend just as with `transpile_latex`; optional frameworks must be installed when
@@ -422,22 +426,6 @@ slower than native array kernels.
 - Piecewise outputs use elementwise selection in array backends. Validate branch domains when an unselected branch could itself produce invalid values.
 - Generated tensor code does not promise a particular device, dtype, or shape policy. Gamma has poles at non-positive integers; behavior at singularities and outside mathematical domains follows the selected backend.
 - Generated Python is not a mathematical proof or a guarantee of numerical stability. Review and test output before relying on it in research or production calculations.
-
----
-
-## Scientific Usage
-
-```python
-import numpy as np
-from latex2code import latex_to_code
-
-# Convert LaTeX formula directly to NumPy executable string
-latex_eq = r"\frac{\sin(x)}{\sqrt{x^2 + 1}}"
-python_code = latex_to_code(latex_eq)
-
-x = np.linspace(0, 10, 100)
-result = eval(python_code)
-```
 
 ---
 
