@@ -5,9 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "latex2code"
 version = "0.1.0"
-description = "Transpilador de expressões LaTeX para funções executáveis em Python"
+authors = [
+  { name="Thúlio Brandão" },
+]
+description = "A lightweight Python library and CLI tool to transpile LaTeX mathematical expressions into executable Python functions."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
 dependencies = [
     "sympy>=1.12",
     "antlr4-python3-runtime==4.11.0",
@@ -21,3 +30,6 @@ dev = [
 
 [project.scripts]
 latex2code = "latex2code.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

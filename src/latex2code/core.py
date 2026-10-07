@@ -1,3 +1,4 @@
+import keyword
 import re
 import sympy as sp
 from sympy.core.function import UndefinedFunction
@@ -8,6 +9,26 @@ class LaTeXTranspilerError(Exception):
     """Base exception raised for errors during LaTeX transpilation."""
 
     pass
+
+
+class InvalidPythonIdentifierError(LaTeXTranspilerError):
+    """Raised when generated Python would contain an invalid identifier."""
+
+    def __init__(self, identifier: object, kind: str):
+        super().__init__(f"{kind} must be a valid non-keyword Python identifier: {identifier!r}.")
+
+
+VALID_LATEX_COMMANDS = {
+    r"\frac", r"\sin", r"\cos", r"\tan", r"\sqrt", r"\sum", r"\prod",
+    r"\left", r"\right", r"\begin", r"\end", r"\exp", r"\log", r"\ln",
+    r"\int", r"\diff", r"\partial", r"\pm", r"\mp", r"\times", r"\cdot",
+    r"\div", r"\ge", r"\le", r"\neq", r"\pi", r"\theta", r"\alpha",
+    r"\beta", r"\gamma", r"\delta", r"\epsilon", r"\varepsilon", r"\zeta",
+    r"\eta", r"\kappa", r"\lambda", r"\mu", r"\nu", r"\xi", r"\rho",
+    r"\sigma", r"\tau", r"\upsilon", r"\phi", r"\varphi", r"\chi",
+    r"\psi", r"\omega", r"\Gamma", r"\Delta", r"\Lambda", r"\Sigma",
+    r"\Theta", r"\Omega", r"\Phi", r"\Pi", r"\Psi", r"\Xi", r"\Upsilon",
+}
 
 
 class InvalidLaTeXSyntaxError(LaTeXTranspilerError):
@@ -21,6 +42,15 @@ class InvalidLaTeXSyntaxError(LaTeXTranspilerError):
             "Please verify brackets, syntax, and LaTeX mathematical commands."
         )
         super().__init__(message)
+
+
+def _validate_python_identifier(identifier: object, kind: str) -> None:
+    if (
+        not isinstance(identifier, str)
+        or not identifier.isidentifier()
+        or keyword.iskeyword(identifier)
+    ):
+        raise InvalidPythonIdentifierError(identifier, kind)
 
 
 def _parse_matrix_environment(latex_str: str) -> sp.Matrix | None:
@@ -45,16 +75,11 @@ def _parse_matrix_environment(latex_str: str) -> sp.Matrix | None:
 
 
 def _check_for_undefined_commands(expr: sp.Expr, raw_str: str) -> None:
-    """Check if the raw LaTeX string or parsed expression contains unknown/unhandled commands."""
-    unhandled_commands = re.findall(r"\\[a-zA-Z]+", raw_str)
-    valid_commands = {
-        r"\frac", r"\sin", r"\cos", r"\tan", r"\sqrt", r"\sum", r"\prod",
-        r"\left", r"\right", r"\begin", r"\end", r"\exp", r"\log", r"\ln",
-        r"\int", r"\diff", r"\partial"
-    }
+    """Check if the raw LaTeX string or parsed expression contains unsupported commands."""
+    unhandled_commands = re.findall(r"\\[A-Za-z]+", raw_str)
 
     for cmd in unhandled_commands:
-        if cmd not in valid_commands:
+        if cmd not in VALID_LATEX_COMMANDS:
             raise InvalidLaTeXSyntaxError(raw_str)
 
     for func in expr.atoms(sp.Function):
@@ -68,19 +93,10 @@ def transpile_latex(
     type_hints: bool = True,
     use_numpy: bool = False,
 ) -> str:
-    """Converts a LaTeX string into executable Python function source code.
-
-    Args:
-        latex_str: The LaTeX math expression.
-        function_name: Name of the output function.
-        type_hints: Whether to add type annotations.
-        use_numpy: If True, uses NumPy arrays/functions.
-
-    Returns:
-        String containing valid Python source code.
-    """
+    """Converts a LaTeX string into executable Python function source code."""
     if not latex_str or not latex_str.strip():
         raise LaTeXTranspilerError("LaTeX expression string cannot be empty.")
+    _validate_python_identifier(function_name, "Function name")
 
     # 1. Parse matrix or general expression
     try:
@@ -102,6 +118,8 @@ def transpile_latex(
 
     # 2. Extract free variables
     variables = sorted([str(symbol) for symbol in expr.free_symbols])
+    for variable in variables:
+        _validate_python_identifier(variable, "Generated argument name")
 
     # 3. Build argument signature
     if type_hints:
@@ -116,6 +134,10 @@ def transpile_latex(
     if is_matrix:
         matrix_list = expr.tolist()
         python_expr_code = f"np.array({matrix_list})"
+    elif use_numpy:
+        python_expr_code = sp.pycode(expr, user_functions={}, fully_qualified_modules=False)
+        for fn in ["sin", "cos", "tan", "sqrt", "exp", "log", "pi"]:
+            python_expr_code = re.sub(rf"\bmath\.{fn}\b", f"np.{fn}", python_expr_code)
     else:
         python_expr_code = sp.pycode(expr)
 
@@ -123,9 +145,12 @@ def transpile_latex(
     imports_list = []
     if "builtins." in python_expr_code:
         imports_list.append("import builtins")
-    if use_numpy or is_matrix:
+
+    if use_numpy or is_matrix or "np." in python_expr_code:
         imports_list.append("import numpy as np")
-    elif any(fn in python_expr_code for fn in ["sin", "cos", "sqrt", "exp", "tan", "log"]):
+    elif "math." in python_expr_code or any(
+        fn in python_expr_code for fn in ["sin(", "cos(", "sqrt(", "exp(", "tan(", "pi"]
+    ):
         imports_list.append("import math")
 
     imports = "\n".join(imports_list)
