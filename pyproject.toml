@@ -4,18 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "latex2code"
-version = "0.1.0"
+version = "0.2.0"
 authors = [
   { name="Thúlio Brandão" },
 ]
 description = "A lightweight Python library and CLI tool to transpile LaTeX mathematical expressions into executable Python functions."
 readme = "README.md"
 requires-python = ">=3.10"
+keywords = ["latex", "sympy", "python", "transpile", "mathematics", "numpy"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Mathematics",
+    "Topic :: Software Development :: Code Generators",
 ]
 dependencies = [
     "sympy>=1.12",
@@ -23,9 +29,15 @@ dependencies = [
     "numpy>=1.24.0",
 ]
 
+[project.urls]
+Homepage = "https://github.com/ThulioASB/latex2code"
+Repository = "https://github.com/ThulioASB/latex2code"
+Issues = "https://github.com/ThulioASB/latex2code/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
+    "build>=1.2.0",
 ]
 
 [project.scripts]
@@ -33,3 +45,6 @@ latex2code = "latex2code.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/tests"]

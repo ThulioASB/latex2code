@@ -12,12 +12,14 @@ Designed for scientific computing, machine learning researchers, and engineers w
 
 ## Features
 
-- 📐 **Common Math:** Translates arithmetic, fractions, powers, roots, and common functions such as `\sin`, `\cos`, `\tan`, `\exp`, and `\log`.
+- 📐 **Common Math:** Translates arithmetic, fractions, powers, roots, limits, binomial coefficients, and common functions such as `\sin`, `\cos`, `\tan`, `\exp`, `\log`, `\operatorname{erf}`, `\max`, and hyperbolic functions.
 - 🔢 **Greek Symbols:** Supports common Greek-letter commands as symbols in expressions.
-- 🔁 **Matrix Support:** Converts LaTeX matrix environments (`\begin{pmatrix}`, `\begin{matrix}`) into `numpy.ndarray` objects.
-- 🧮 **Symbolic Operations:** Uses SymPy to evaluate supported derivatives, integrals, and finite sums symbolically.
+- 🔁 **Matrix Support:** Converts LaTeX matrix environments (`\begin{pmatrix}`, `\begin{bmatrix}`, `\begin{matrix}`) into `numpy.ndarray` objects.
+- 🧩 **Piecewise Expressions:** Recognizes `\begin{cases} ... \end{cases}` and emits Python conditional expressions.
+- 🔒 **Absolute Values & Floor/Ceiling:** Handles common wrappers like `\left|x\right|`, `\left\lfloor x \right\rfloor`, and `\left\lceil x \right\rceil`.
+- 🧮 **Symbolic Operations:** Uses SymPy to evaluate supported derivatives, limits, integrals, and finite products; finite sums are emitted as executable Python.
 - 🏷️ **Type Annotations:** Automatically generates functions with PEP 484 type hints.
-- 💻 **Command Line Interface:** Transpiles formulas directly from your terminal.
+- 💻 **Command Line Interface:** Transpiles formulas directly from your terminal and accepts input from stdin.
 
 This is a focused expression transpiler, not a complete LaTeX implementation or a computer algebra system.
 
@@ -93,6 +95,58 @@ def create_matrix(x, y):
 
 ```
 
+### Piecewise Expressions
+
+```python
+from latex2code import transpile_latex
+
+code = transpile_latex(
+    r"\begin{cases} x & x > 0 \\ -x & x \le 0 \end{cases}",
+    function_name="abs_value",
+    type_hints=False,
+)
+print(code)
+```
+
+**Output:**
+
+```python
+def abs_value(x):
+    return (x) if (x > 0) else (-x)
+```
+
+### Limits and Binomial Coefficients
+
+```python
+from latex2code import transpile_latex
+
+limit_code = transpile_latex(r"\lim_{x \to 0} \frac{\sin(x)}{x}", function_name="sinc_limit", type_hints=False)
+print(limit_code)
+
+binomial_code = transpile_latex(r"\binom{n}{k}", function_name="choose", type_hints=False)
+print(binomial_code)
+
+product_code = transpile_latex(r"\prod_{i=1}^{n} i", function_name="factorial_product", type_hints=False)
+print(product_code)
+```
+
+**Output:**
+
+```python
+def sinc_limit():
+    return 1
+
+import math
+
+def choose(n, k):
+    return (math.gamma(n + 1)/(math.gamma(k + 1)*math.gamma(-k + n + 1)))
+
+import math
+
+def factorial_product(n):
+    return math.factorial(n)
+```
+
 ---
 
 ## CLI Usage
@@ -101,8 +155,21 @@ You can run `latex2code` directly from your command line:
 
 ```powershell
 latex2code "\frac{a}{b}" --name divide
-
 ```
+
+You can also pipe input from standard input:
+
+```powershell
+"\sin(x) + \cos(y)" | latex2code - --name signal
+```
+
+Write the generated source directly to a Python file with `--output`:
+
+```powershell
+latex2code "\frac{a}{b}" --name divide --output divide.py
+```
+
+When `--numpy` is enabled, generated annotations accept either scalar floats or NumPy arrays. Matrix functions always annotate their result as `numpy.ndarray`; their entries accept arrays too when NumPy mode is enabled.
 
 ### Options
 
@@ -111,6 +178,7 @@ latex2code "\frac{a}{b}" --name divide
 | `-n` | `--name` | Name of the generated Python function (default: `formula`). |
 |  | `--no-types` | Disable type hints in the generated signature. |
 | `-p` | `--numpy` | Force generation with NumPy functions/arrays. |
+| `-o` | `--output` | Write generated Python source to a file instead of stdout. |
 
 ---
 
@@ -125,9 +193,13 @@ pytest
 ## Supported Scope and Limitations
 
 - Input is parsed by SymPy's LaTeX parser. Support is limited to mathematical expressions it can parse and the commands recognized by this package; document markup, arbitrary custom functions, and many advanced LaTeX constructs are outside the scope.
+- Unsupported commands and custom functions raise `UnsupportedLaTeXFeatureError`, an `InvalidLaTeXSyntaxError` subclass, so callers can report unsupported syntax separately from malformed input.
+- Piecewise cases without an explicit default remain undefined outside their listed conditions; generated Python returns `None` there, while NumPy mode represents those values as `numpy.nan`.
 - Greek symbols may become function parameters rather than built-in constants. Inspect the generated signature and provide the intended values.
 - Derivatives and integrals are evaluated symbolically when SymPy can do so. An indefinite integral returns one antiderivative and does not add the arbitrary constant of integration.
 - Finite sums are emitted as executable Python sum expressions. Matrices are emitted as NumPy arrays.
+- Finite products are symbolically evaluated when SymPy can reduce them; unresolved symbolic products raise `CodeGenerationError` rather than returning incomplete Python.
+- NumPy mode emits array-aware operations for elementwise expressions; special functions unavailable in NumPy directly use vectorized standard-library implementations. Finite sums still use scalar iteration bounds.
 - Generated Python is not a mathematical proof or a guarantee of numerical stability. Review and test output before relying on it in research or production calculations.
 
 ---
