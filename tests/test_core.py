@@ -1213,3 +1213,78 @@ def test_aligned_equation_environments_are_matrix_like():
 def test_invalid_syntax():
     with pytest.raises(InvalidLaTeXSyntaxError, match="curly braces are balanced"):
         transpile_latex(r"\frac{x}{2")
+
+
+@pytest.mark.parametrize(
+    "func_name, value, expected_fn",
+    [
+        (r"\sinh", 0.5, math.sinh),
+        (r"\cosh", 0.5, math.cosh),
+        (r"\tanh", 0.5, math.tanh),
+        (r"\asinh", 0.5, math.asinh),
+        (r"\acosh", 1.5, math.acosh),
+        (r"\atanh", 0.5, math.atanh),
+    ],
+)
+def test_hyperbolic_and_inverse_hyperbolic_functions(func_name, value, expected_fn):
+    code = transpile_latex(f"{func_name}(x)", type_hints=False)
+    scope = {}
+    exec(code, scope)
+    assert math.isclose(scope["formula"](value), expected_fn(value))
+
+
+@pytest.mark.parametrize(
+    "env",
+    ["bmatrix", "matrix"],
+)
+def test_additional_matrix_environments(env):
+    latex_matrix = f"\\begin{{{env}}} a & b \\\\ c & d \\end{{{env}}}"
+    code = transpile_latex(latex_matrix, use_numpy=True, type_hints=False)
+    scope = {"np": np}
+    exec(code, scope)
+    result = scope["formula"](1, 2, 3, 4)
+    expected = np.array([[1, 2], [3, 4]])
+    assert np.array_equal(result, expected)
+
+
+def test_floor_and_ceiling_functions():
+    floor_code = transpile_latex(r"\left\lfloor x \right\rfloor", type_hints=False)
+    floor_scope = {}
+    exec(floor_code, floor_scope)
+    assert floor_scope["formula"](2.7) == 2.0
+
+    ceil_code = transpile_latex(r"\left\lceil x \right\rceil", type_hints=False)
+    ceil_scope = {}
+    exec(ceil_code, ceil_scope)
+    assert ceil_scope["formula"](2.1) == 3.0
+
+
+def test_min_function():
+    code = transpile_latex(r"\min(x, y)", type_hints=False)
+    scope = {}
+    exec(code, scope)
+    assert scope["formula"](5, 2) == 2
+
+
+@pytest.mark.parametrize("backend", ["torch", "jax"])
+def test_cli_supports_framework_backends_with_output_file(monkeypatch, tmp_path, backend):
+    pytest.importorskip(backend)
+    output_file = tmp_path / f"generated_{backend}.py"
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "latex2code",
+            r"\sin(x)^2 + x",
+            "--backend",
+            backend,
+            "--output",
+            str(output_file),
+        ],
+    )
+
+    cli_main()
+
+    content = output_file.read_text(encoding="utf-8")
+    expected_import = "import torch" if backend == "torch" else "import jax"
+    assert expected_import in content
+    assert "def formula(" in content
