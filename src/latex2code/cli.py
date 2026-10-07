@@ -4,8 +4,18 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 from latex2code import __version__
-from latex2code.core import LaTeXTranspilerError, inspect_latex, transpile_latex
+from latex2code.core import LaTeXTranspilerError, inspect_latex, latex_to_code, transpile_latex
 
+def interactive_mode():
+  print("LaTeX2Code Interactive Mode (type 'exit' to quit)")
+  while True:
+    try:
+      user_input = input("LaTeX > ")
+      if user_input.strip().lower() in ("exit", "quit"):
+        break
+      print("Python >", latex_to_code(user_input))
+    except Exception as e:
+      print(f"Error: {e}", file=sys.stderr)
 
 def main():
     parser = argparse.ArgumentParser(
@@ -72,7 +82,8 @@ def main():
     args = parser.parse_args()
 
     if args.latex is None and not args.interactive:
-        parser.error("the following arguments are required: latex")
+        interactive_mode()
+        return
     if args.interactive and args.latex is not None:
         parser.error("--interactive cannot be combined with a positional expression")
     if args.inspect and args.output:

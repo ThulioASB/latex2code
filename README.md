@@ -410,6 +410,22 @@ slower than native array kernels.
 
 ---
 
+## Scientific Usage
+
+```python
+import numpy as np
+from latex2code import latex_to_code
+
+# Convert LaTeX formula directly to NumPy executable string
+latex_eq = r"\frac{\sin(x)}{\sqrt{x^2 + 1}}"
+python_code = latex_to_code(latex_eq)
+
+x = np.linspace(0, 10, 100)
+result = eval(python_code)
+```
+
+---
+
 ## License
 
 Distributed under the MIT License. See `LICENSE` for more information.

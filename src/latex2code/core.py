@@ -45,6 +45,8 @@ VALID_LATEX_COMMANDS = {
     r"\cases", r"\array", r"\align", r"\align*", r"\aligned",
     r"\gathered", r"\eqnarray", r"\eqnarray*", r"\vert", r"\mid",
     r"\lvert", r"\rvert", r"\langle", r"\rangle", r"\lfloor",
+    r"\vspace", r"\hspace", r"\quad", r"\qquad", r"\textbf",
+    r"\mathrm", r"\text", r"\begin{bmatrix}", r"\end{bmatrix}",
     r"\rfloor", r"\lceil", r"\rceil", r"\to",
 }
 
@@ -1291,3 +1293,32 @@ def compile_latex(
             f"Generated object {function_name!r} is not callable."
         )
     return CompiledFormula(info=info, function=function)
+
+def latex_to_code(
+    latex_str: str, custom_symbol_map: dict[str, str] | None = None
+) -> str:
+    """Converts a LaTeX math string to executable Python/NumPy code.
+
+    Optional custom_symbol_map overrides specific LaTeX macros (e.g. {'\\alpha':
+    'alpha_val'}).
+    """
+    if custom_symbol_map:
+        for macro, python_var in custom_symbol_map.items():
+            latex_str = latex_str.replace(macro, python_var)
+
+    # Strip purely visual LaTeX formatting tags before parsing
+    latex_str = re.sub(
+        r"\\(vspace|hspace|quad|qquad|textbf|mathrm|text)\{[^}]*\}", "", latex_str
+    )
+
+    # Convert LaTeX matrix environments into numpy array syntax
+    latex_str = re.sub(
+        r"\\begin\{bmatrix\}(.*?)\\end\{bmatrix\}",
+        lambda m: f"np.array([{m.group(1).replace(r'\\\\', '], [').replace('&', ', ')}])",
+        latex_str,
+        flags=re.DOTALL,
+    )
+
+    # Execute compilation using your existing compile_latex pipeline
+    compiled = compile_latex(latex_str)
+    return compiled.info.generated_code
