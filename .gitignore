@@ -35,6 +35,7 @@ MANIFEST
 
 # Virtual Environments
 venv/
+venv_test/
 env/
 ENV/
 env.bak/
