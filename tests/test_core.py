@@ -3,6 +3,7 @@ import math
 from io import StringIO
 
 import numpy as np
+import importlib.util
 import pytest
 import sympy as sp
 from hypothesis import given
@@ -1487,13 +1488,25 @@ def test_min_function():
     assert scope["formula"](5, 2) == 2
 
 
-def test_ml_activations_new():
+def test_ml_activations_new_python():
     code_gelu = transpile_latex(r"\operatorname{gelu}(x)", backend="python")
     assert "math.erf" in code_gelu or "gelu" in code_gelu
 
-    code_silu_torch = transpile_latex(r"\operatorname{silu}(x)", backend="torch")
-    assert "F.silu" in code_silu_torch
 
+@pytest.mark.skipif(
+    importlib.util.find_spec("torch") is None,
+    reason="torch is not installed",
+)
+def test_ml_activations_new_torch():
+    code_silu_torch = transpile_latex(r"\operatorname{silu}(x)", backend="torch")
+    assert "F.silu" in code_silu_torch or "torch.nn.functional.silu" in code_silu_torch
+
+
+@pytest.mark.skipif(
+    importlib.util.find_spec("jax") is None,
+    reason="jax is not installed",
+)
+def test_ml_activations_new_jax():
     code_softmax_jax = transpile_latex(r"\operatorname{softmax}(x)", backend="jax")
     assert "jax.nn.softmax" in code_softmax_jax
 
