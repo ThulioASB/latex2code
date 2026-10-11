@@ -45,6 +45,22 @@ class _PythonPrinter(PythonCodePrinter):
         self.module_imports["builtins"].add("sum")
         return super()._print_Sum(expr)
 
+    def _print__StableGelu(self, expr: sp.Expr) -> str:
+        self.module_imports["math"].add("erf")
+        self.module_imports["math"].add("sqrt")
+        arg = self.doprint(expr.args[0])
+        return f"(0.5 * {arg} * (1 + math.erf({arg} / math.sqrt(2))))"
+
+    def _print__StableSilu(self, expr: sp.Expr) -> str:
+        self.module_imports["math"].add("exp")
+        arg = self.doprint(expr.args[0])
+        return f"({arg} / (1 + math.exp(-({arg}))))"
+
+    def _print__StableSoftmax(self, expr: sp.Expr) -> str:
+        self.module_imports["math"].add("exp")
+        arg = self.doprint(expr.args[0])
+        return f"[math.exp(i) / sum(math.exp(j) for j in {arg}) for i in {arg}]"
+
 
 class _FrameworkPrinter(NumPyPrinter):
     def __init__(self, backend: Backend):
@@ -160,6 +176,33 @@ class _FrameworkPrinter(NumPyPrinter):
 
     def _print_Min(self, expr: sp.Min) -> str:
         return self._print_extreme(expr, "minimum")
+
+    def _print__StableGelu(self, expr: sp.Expr) -> str:
+        arg = self.doprint(expr.args[0])
+        if self.backend == "torch":
+            return f"F.gelu({arg})"
+        elif self.backend == "jax":
+            return f"jax.nn.gelu({arg})"
+        else:
+            return f"(0.5 * {arg} * (1 + np.vectorize(math.erf)({arg} / np.sqrt(2))))"
+
+    def _print__StableSilu(self, expr: sp.Expr) -> str:
+        arg = self.doprint(expr.args[0])
+        if self.backend == "torch":
+            return f"F.silu({arg})"
+        elif self.backend == "jax":
+            return f"jax.nn.silu({arg})"
+        else:
+            return f"({arg} / (1 + np.exp(-({arg}))))"
+
+    def _print__StableSoftmax(self, expr: sp.Expr) -> str:
+        arg = self.doprint(expr.args[0])
+        if self.backend == "torch":
+            return f"F.softmax({arg}, dim=-1)"
+        elif self.backend == "jax":
+            return f"jax.nn.softmax({arg})"
+        else:
+            return f"scipy.special.softmax({arg})"
 
     def _print_extreme(self, expr: sp.Expr, operation: str) -> str:
         module = self.backend_spec.module_alias

@@ -35,6 +35,18 @@ class _StableBeta(sp.Function):
     nargs = 2
 
 
+class _StableGelu(sp.Function):
+    nargs = 1
+
+
+class _StableSilu(sp.Function):
+    nargs = 1
+
+
+class _StableSoftmax(sp.Function):
+    nargs = 1
+
+
 OPERATORNAME_FUNCTIONS = {
     "erf": sp.erf,
     "erfc": sp.erfc,
@@ -57,6 +69,9 @@ OPERATORNAME_FUNCTIONS = {
     "logit": lambda value: sp.log(value / (1 - value)),
     "softsign": lambda value: value / (1 + sp.Abs(value)),
     "swish": _StableSwish,
+    "softmax": _StableSoftmax,
+    "gelu": _StableGelu,
+    "silu": _StableSilu,
 }
 
 
@@ -393,6 +408,9 @@ PYTHON_FUNCTIONS = {
     "logit": lambda value: sp.log(value / (1 - value)),
     "softsign": lambda value: value / (1 + sp.Abs(value)),
     "swish": _StableSwish,
+    "softmax": _StableSoftmax,
+    "gelu": _StableGelu,
+    "silu": _StableSilu,
 }
 
 

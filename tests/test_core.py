@@ -1487,6 +1487,17 @@ def test_min_function():
     assert scope["formula"](5, 2) == 2
 
 
+def test_ml_activations_new():
+    code_gelu = transpile_latex(r"\operatorname{gelu}(x)", backend="python")
+    assert "math.erf" in code_gelu or "gelu" in code_gelu
+
+    code_silu_torch = transpile_latex(r"\operatorname{silu}(x)", backend="torch")
+    assert "F.silu" in code_silu_torch
+
+    code_softmax_jax = transpile_latex(r"\operatorname{softmax}(x)", backend="jax")
+    assert "jax.nn.softmax" in code_softmax_jax
+
+
 @pytest.mark.parametrize("backend", ["torch", "jax"])
 def test_cli_supports_framework_backends_with_output_file(
     monkeypatch, tmp_path, backend
