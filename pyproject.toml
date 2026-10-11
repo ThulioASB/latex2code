@@ -34,6 +34,7 @@ dependencies = [
 Homepage = "https://github.com/ThulioASB/latex2code"
 Repository = "https://github.com/ThulioASB/latex2code"
 Issues = "https://github.com/ThulioASB/latex2code/issues"
+Changelog = "https://github.com/ThulioASB/latex2code/releases"
 
 [project.optional-dependencies]
 dev = [

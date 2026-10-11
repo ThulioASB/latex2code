@@ -45,6 +45,8 @@ pip install "latex2code[torch]"
 pip install "latex2code[jax]"
 ```
 
+Building from source / Local Development
+
 ```bash
 git clone https://github.com/ThulioASB/latex2code.git
 cd latex2code

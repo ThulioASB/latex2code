@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software in your research or project, please cite it as below."
+authors:
+  - family-names: "Brandão"
+    given-names: "Thúlio"
+title: "latex2code: Transpiling LaTeX expressions into executable Python, NumPy, PyTorch, and JAX"
+version: 0.2.1
+date-released: 2026-10-11
+url: "https://github.com/ThulioASB/latex2code"
