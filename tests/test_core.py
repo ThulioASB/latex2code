@@ -1,9 +1,9 @@
+import importlib.util
 import json
 import math
 from io import StringIO
 
 import numpy as np
-import importlib.util
 import pytest
 import sympy as sp
 from hypothesis import given
