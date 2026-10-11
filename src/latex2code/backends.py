@@ -83,7 +83,12 @@ BACKENDS: dict[Backend, BackendSpec] = {
         "jax.Array",
         "jax.Array",
         "jnp",
-        ("import jax", "import jax.numpy as jnp", "import jax.scipy.special", "import jax.nn"),
+        (
+            "import jax",
+            "import jax.numpy as jnp",
+            "import jax.scipy.special",
+            "import jax.nn",
+        ),
         _FUNCTION_ALIASES,
         {
             "erf": "jax.scipy.special.erf",
