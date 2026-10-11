@@ -1,5 +1,7 @@
 # latex2code 🧮 ➡️ 🐍
 
+[![PyPI version](https://badge.fury.io/py/latex2code.svg)](https://badge.fury.io/py/latex2code)
+[![Tests Status](https://github.com/ThulioASB/latex2code/actions/workflows/tests.yml/badge.svg)](https://github.com/ThulioASB/latex2code/actions)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -19,7 +21,7 @@ Designed for scientific computing, machine learning researchers, and engineers w
 - 🔒 **Absolute Values & Floor/Ceiling:** Handles common wrappers like `\left|x\right|`, `\left\lfloor x \right\rfloor`, and `\left\lceil x \right\rceil`.
 - 🧮 **Symbolic Operations:** Uses SymPy to evaluate supported derivatives, limits, integrals, finite products, and nth roots; finite sums are emitted as executable Python.
 - 📐 **Extended Trig & Inverse Functions:** Supports reciprocal and inverse trig functions such as `\csc`, `\arccot`, `\arcsec`, and `\arccsc`.
-- 🤖 **Machine-Learning Functions:** Supports `\operatorname{sigmoid}(x)`, `\operatorname{relu}(x)`, `\operatorname{softplus}(x)`, `\operatorname{logit}(x)`, `\operatorname{softsign}(x)`, and `\operatorname{swish}(x)` in scalar, NumPy, PyTorch, and JAX modes.
+- 🤖 **Machine-Learning Functions:** Supports `\operatorname{sigmoid}(x)`, `\operatorname{relu}(x)`, `\operatorname{softplus}(x)`, `\operatorname{softmax}(x)`, `\operatorname{gelu}(x)`, `\operatorname{silu}(x)`, `\operatorname{logit}(x)`, `\operatorname{softsign}(x)`, and `\operatorname{swish}(x)` across scalar, NumPy, PyTorch, and JAX modes.
 - 🏷️ **Type Annotations:** Automatically generates functions with PEP 484 type hints.
 - 🔍 **Inspection Reports:** Shows the parsed symbolic expression, variables, warnings, and generated Python source.
 - 💻 **Command Line Interface:** Transpiles formulas directly from your terminal and accepts input from stdin.
@@ -30,7 +32,18 @@ This is a focused expression transpiler, not a complete LaTeX implementation or 
 
 ## Installation
 
-Clone the repository and install in editable mode:
+Install the latest release directly from PyPI:
+
+```bash
+pip install latex2code
+```
+
+With optional framework backends (PyTorch / JAX):
+
+```bash
+pip install "latex2code[torch]"
+pip install "latex2code[jax]"
+```
 
 ```bash
 git clone https://github.com/ThulioASB/latex2code.git
@@ -38,14 +51,6 @@ cd latex2code
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -e .
-
-```
-
-Install an optional differentiable backend with one of the extras:
-
-```powershell
-pip install -e ".[torch]"
-pip install -e ".[jax]"
 ```
 
 ---
@@ -413,6 +418,7 @@ function has equivalent semantics across targets:
 | Piecewise array evaluation | Python conditional expression | `where`, eager branches | `where`, eager branches | `where`, eager branches |
 | Automatic differentiation | No | No | Yes, for differentiable native operations | Yes, for differentiable native operations |
 | JIT compilation | No library guarantee | No library guarantee | No library guarantee | `jax.jit` tested for supported primitives |
+| ML operators | `sigmoid`, `relu`, `softplus`, `softmax`, `gelu`, `silu`, `logit`, `softsign`, `swish` | Use `\operatorname{...}(x)`; stable scalar/framework-native implementations. |
 
 PyTorch and JAX are optional runtime dependencies. Operations without a native differentiable
 implementation are rejected rather than silently replaced with Python math. JAX commonly defaults
