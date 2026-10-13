@@ -62,10 +62,10 @@ pip install "latex2code[torch]"
 pip install "latex2code[jax]"
 ```
 
-Requirements: Python 3.10+, SymPy, and `antlr4-python3-runtime` (needed by SymPy's LaTeX
-parser; installed automatically). The generated code imports only what its backend needs:
-the standard library for `python` (plus NumPy if the formula is a matrix), NumPy and SciPy for
-`numpy`, PyTorch for `torch`, and JAX for `jax`.
+Requirements: Python 3.10+, SymPy, NumPy, and `antlr4-python3-runtime` 4.11.x (needed by SymPy's
+LaTeX parser; installed automatically). The generated code imports only what its backend needs:
+the standard library for `python` (plus NumPy if the formula is a matrix), NumPy for `numpy`,
+PyTorch for `torch`, and JAX for `jax`.
 
 From source:
 

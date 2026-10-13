@@ -292,6 +292,8 @@ def _transpile_latex(
 
     # 5. Assemble required imports
     imports_list = list(backend_spec.imports)
+    if backend == "numpy" and "math." not in python_expr_code:
+        imports_list.remove("import math")
     if backend == "python":
         if is_matrix:
             imports_list.append("import numpy as np")

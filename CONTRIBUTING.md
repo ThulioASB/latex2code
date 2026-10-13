@@ -10,22 +10,24 @@ git clone https://github.com/ThulioASB/latex2code.git
 cd latex2code
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-pip install -e .
-pip install pytest hypothesis black
+pip install -e ".[dev]"
 ```
 
-The suite imports NumPy, SymPy, and Hypothesis. The PyTorch and JAX tests skip themselves when
-those frameworks are not installed; install them to run those tests:
+Use the `dev` extra rather than installing pytest by hand: `pyproject.toml` configures pytest to
+run with `--cov`, which needs `pytest-cov`. The PyTorch and JAX tests skip themselves when those
+frameworks are missing; install them to run those tests:
 
 ```bash
-pip install torch jax
+pip install -e ".[torch,jax]"
 ```
 
-## Running tests and formatting
+## Running checks
 
 ```bash
 pytest
-black src tests
+black --check src tests
+ruff check src tests
+mypy src
 ```
 
 ## Guidelines

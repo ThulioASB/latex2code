@@ -223,7 +223,10 @@ class _FrameworkPrinter(NumPyPrinter):
         elif self.backend == "jax":
             return f"jax.nn.softmax({arg})"
         else:
-            return f"scipy.special.softmax({arg})"
+            return (
+                f"(lambda z: np.exp(z - np.max(z)) / np.sum(np.exp(z - np.max(z))))"
+                f"({arg})"
+            )
 
     def _print_extreme(self, expr: sp.Expr, operation: str) -> str:
         module = self.backend_spec.module_alias

@@ -19,9 +19,9 @@ arbitrary macros.
 - Input is parsed strictly by SymPy's ANTLR-based LaTeX parser plus a restricted safe fallback,
   so malformed trailing tokens are rejected rather than silently discarded. Document markup,
   arbitrary TeX macros, and arbitrary custom functions are out of scope.
-- SymPy's LaTeX grammar requires the `antlr4-python3-runtime` package (declared with a
-  compatible version range). SymPy's Lark backend was evaluated but does not cover the
-  expression grammar and constructs supported here.
+- SymPy's LaTeX grammar requires the `antlr4-python3-runtime` package, pinned to the 4.11.x
+  series that SymPy's generated parser expects. SymPy's Lark backend was evaluated but does not
+  cover the expression grammar and constructs supported here.
 - Presentation-only spacing commands such as `\quad`, `\qquad`, `\,`, `\hspace{...}`, and
   `\vspace{...}` are ignored, as are `\displaystyle` and related math-style commands. Text
   wrappers and unknown macros are not stripped because they can carry mathematical meaning;

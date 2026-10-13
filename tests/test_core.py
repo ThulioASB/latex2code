@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import math
+import warnings
 from io import StringIO
 
 import numpy as np
@@ -464,6 +465,58 @@ def test_framework_backend_source_and_annotations(backend, imports, annotation):
     if backend == "jax":
         assert "import numpy as np" not in code
     compile(code, f"<{backend} generated source>", "exec")
+
+
+@pytest.mark.parametrize(
+    "latex",
+    [
+        r"\sin(x) + x^2",
+        r"\operatorname{erf}(x)",
+        r"\operatorname{gamma}(x)",
+        r"\operatorname{sigmoid}(x)",
+        r"\operatorname{gelu}(x)",
+        r"\operatorname{softmax}(x)",
+        r"\binom{n}{k}",
+        r"\begin{pmatrix} x & 1 \\ 0 & y \end{pmatrix}",
+    ],
+)
+@pytest.mark.parametrize(
+    "backend, allowed",
+    [
+        ("python", {"math", "numpy", "builtins", "functools"}),
+        ("numpy", {"numpy", "math"}),
+    ],
+)
+def test_generated_code_only_imports_declared_dependencies(latex, backend, allowed):
+    """Generated code must run on a clean install (numpy is the only runtime dependency)."""
+    import ast
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", PiecewiseEvaluationWarning)
+        code = transpile_latex(latex, backend=backend)
+    imported = set()
+    for node in ast.walk(ast.parse(code)):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[0])
+    assert imported <= allowed, f"unexpected imports {imported - allowed} in:\n{code}"
+
+
+def test_numpy_backend_imports_math_only_when_used():
+    assert "import math" not in transpile_latex(r"\sin(x) + x^2", backend="numpy")
+    assert "import math" in transpile_latex(r"\operatorname{erf}(x)", backend="numpy")
+
+
+def test_numpy_softmax_matches_scipy_reference():
+    scipy_special = pytest.importorskip("scipy.special")
+    softmax = compile_latex(r"\operatorname{softmax}(x)", backend="numpy")
+    for values in (
+        np.array([1.0, 2.0, 3.0]),
+        np.array([1000.0, 1001.0]),  # overflows without max-subtraction
+        np.array([[1.0, 2.0], [3.0, 4.0]]),
+    ):
+        assert np.allclose(softmax(values), scipy_special.softmax(values))
 
 
 def test_backend_rejects_unknown_and_conflicting_options():
