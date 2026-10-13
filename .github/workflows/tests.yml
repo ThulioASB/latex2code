@@ -5,6 +5,8 @@ on:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
+  # Lets publish.yml run the full suite before releasing.
+  workflow_call:
 
 permissions:
   contents: read
@@ -14,6 +16,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Formatting, lint and types do not depend on the OS or Python version,
+  # so run them once instead of in every matrix cell.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
+
+    - name: Check formatting and lint
+      run: |
+        python -m black --check src tests
+        python -m ruff check src tests
+
+    - name: Check types
+      run: python -m mypy src/latex2code
+
+  # Full suite with both optional frameworks installed.
   test:
     runs-on: ${{ matrix.os }}
     strategy:
@@ -33,20 +61,86 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e .[dev]
+        pip install -e ".[dev]"
         pip install torch --index-url https://download.pytorch.org/whl/cpu
         pip install "jax[cpu]>=0.4"
 
-    - name: Check formatting and lint
-      run: |
-        python -m black --check src tests
-        python -m ruff check src tests
+    - name: Run Pytest
+      run: python -m pytest -rs
 
-    - name: Check types
-      run: python -m mypy src/latex2code
+  # Same suite without torch/jax: their tests must skip cleanly, and nothing
+  # else may quietly depend on them.
+  no-frameworks:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install project and test dependencies only
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev]"
 
     - name: Run Pytest
       run: python -m pytest -rs
+
+  # What a user gets from a plain `pip install latex2code`: no extras, no dev
+  # tools, no torch/jax (which would pull in SciPy). Generated code must run.
+  minimal-install:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.13"]
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install the package with runtime dependencies only
+      run: |
+        python -m pip install --upgrade pip
+        pip install .
+        pip check
+
+    - name: Smoke test
+      run: |
+        latex2code --version
+        latex2code '\frac{a}{b}' --name divide
+        python - <<'EOF'
+        import importlib.util
+
+        import numpy as np
+
+        for name in ("scipy", "torch", "jax", "pytest"):
+            assert importlib.util.find_spec(name) is None, f"{name} must not be installed"
+
+        from latex2code import compile_latex
+
+        x = np.linspace(0, 10, 50)
+        wave = compile_latex(r"\frac{\sin(x)}{\sqrt{x^2 + 1}}", backend="numpy")
+        assert np.allclose(wave(x), np.sin(x) / np.sqrt(x**2 + 1))
+
+        softmax = compile_latex(r"\operatorname{softmax}(x)", backend="numpy")
+        values = np.array([1.0, 2.0, 3.0])
+        expected = np.exp(values - values.max())
+        assert np.allclose(softmax(values), expected / expected.sum())
+
+        ratio = compile_latex(r"\frac{x}{y}")
+        assert ratio(6, 3) == 2
+
+        matrix = compile_latex(r"\begin{pmatrix} x^2 & 1 \\ 0 & y \end{pmatrix}")
+        assert np.array_equal(matrix(2, 3), np.array([[4, 1], [0, 3]]))
+
+        print("minimal install OK")
+        EOF
 
   build:
     runs-on: ubuntu-latest
@@ -56,37 +150,8 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: "3.12"
-    - name: Install build tools
-      run: python -m pip install --upgrade pip build
     - name: Build source distribution and wheel
-      run: python -m build
-
-  framework-tests:
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: [torch, jax]
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
-    - name: Install project and test dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[dev]"
-
-    - name: Install PyTorch CPU
-      if: matrix.backend == 'torch'
-      run: pip install torch --index-url https://download.pytorch.org/whl/cpu
-
-    - name: Install JAX CPU
-      if: matrix.backend == 'jax'
-      run: pip install "jax[cpu]>=0.4"
-
-    - name: Test ${{ matrix.backend }} backend
-      run: python -m pytest -rs -q -k "${{ matrix.backend }}"
+        python -m pip install --upgrade pip build twine
+        python -m build
+        python -m twine check dist/*

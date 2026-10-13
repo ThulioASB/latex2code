@@ -1,25 +1,25 @@
 name: Publish to PyPI
 
+# Publish by creating a GitHub release for a tag such as v0.3.0.
+# (Triggering on both `release` and tag pushes would run this twice per
+# release, and the second upload fails because PyPI rejects existing files.)
 on:
   release:
     types: [published]
-  push:
-    tags:
-      - 'v*'
 
 permissions:
   contents: read
 
 jobs:
-  publish:
-    name: Build and publish to PyPI
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/p/latex2code
-    permissions:
-      id-token: write
+  # Never publish code that does not pass the full test suite.
+  tests:
+    name: Run tests
+    uses: ./.github/workflows/tests.yml
 
+  build:
+    name: Build distributions
+    needs: tests
+    runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
 
@@ -28,13 +28,51 @@ jobs:
       with:
         python-version: "3.12"
 
-    - name: Install build tools
+    - name: Check that the release tag matches the package version
       run: |
-        python -m pip install --upgrade pip
-        pip install build
+        python - <<'EOF'
+        import os
+        import tomllib
+
+        tag = os.environ["GITHUB_REF_NAME"]
+        with open("pyproject.toml", "rb") as handle:
+            version = tomllib.load(handle)["project"]["version"]
+        if tag.removeprefix("v") != version:
+            raise SystemExit(
+                f"Release tag {tag!r} does not match pyproject version {version!r}."
+            )
+        print(f"Releasing version {version}")
+        EOF
 
     - name: Build sdist and wheel
-      run: python -m build
+      run: |
+        python -m pip install --upgrade pip build twine
+        python -m build
+        python -m twine check dist/*
+
+    - name: Upload distributions
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist
+        path: dist/
+        if-no-files-found: error
+
+  # Only this job gets the OIDC token, and it runs no project code.
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/latex2code
+    permissions:
+      id-token: write
+    steps:
+    - name: Download distributions
+      uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist/
 
     - name: Publish package to PyPI
       uses: pypa/gh-action-pypi-publish@release/v1

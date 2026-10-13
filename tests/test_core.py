@@ -33,9 +33,7 @@ def test_removed_legacy_arguments_are_rejected():
         transpile_latex("x", use_numpy=True)
     with pytest.raises(TypeError):
         compile_latex("x", use_numpy=True)
-    import latex2code
-
-    assert not hasattr(latex2code, "latex_to_code")
+    assert not hasattr(importlib.import_module("latex2code"), "latex_to_code")
 
 
 def test_docstring_is_off_by_default():
@@ -488,7 +486,7 @@ def test_framework_backend_source_and_annotations(backend, imports, annotation):
     ],
 )
 def test_generated_code_only_imports_declared_dependencies(latex, backend, allowed):
-    """Generated code must run on a clean install (numpy is the only runtime dependency)."""
+    """Generated code must run on a clean install (NumPy is the only extra)."""
     import ast
 
     with warnings.catch_warnings():

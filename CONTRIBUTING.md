@@ -30,6 +30,16 @@ ruff check src tests
 mypy src
 ```
 
+CI runs the same checks on every pull request, plus the suite on Linux and Windows with
+Python 3.10 to 3.13, a run without PyTorch/JAX, and a minimal-install smoke test.
+
+## Releasing
+
+1. Update `version` in `pyproject.toml` and move the `CHANGELOG.md` entry out of Unreleased.
+2. Merge to `main` once CI is green.
+3. Create a GitHub release for the tag `vX.Y.Z`. Publishing the release runs the tests, checks
+   that the tag matches `pyproject.toml`, and uploads to PyPI.
+
 ## Guidelines
 
 - Add a test with every behavior change. Transpilation tests should `exec` the generated source
