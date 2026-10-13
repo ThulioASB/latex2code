@@ -41,6 +41,25 @@ class _PythonPrinter(PythonCodePrinter):
         )
         return f"(({sign_first}) * ({sign_second}) / ({sign_total}) * math.exp({log_magnitude}))"
 
+    @staticmethod
+    def _parenthesize(printed: str) -> str:
+        """Wrap printed code in parentheses unless it is a bare name or number."""
+        if printed.isidentifier() or printed.replace(".", "", 1).isdigit():
+            return printed
+        return f"({printed})"
+
+    def _print_binomial(self, expr: sp.Expr) -> str:
+        # math.comb is exact for non-negative integers; fall back to the
+        # gamma-function form so real-valued arguments keep working.
+        self._require_math()
+        first, second = (self._parenthesize(self._print(v)) for v in expr.args)
+        gamma_form = self._print(expr.rewrite(sp.gamma))
+        return (
+            f"(math.comb({first}, {second}) "
+            f"if isinstance({first}, int) and isinstance({second}, int) "
+            f"and {first} >= 0 and {second} >= 0 else {gamma_form})"
+        )
+
     def _print_Sum(self, expr: sp.Sum) -> str:
         self.module_imports["builtins"].add("sum")
         return super()._print_Sum(expr)
@@ -182,7 +201,9 @@ class _FrameworkPrinter(NumPyPrinter):
         if self.backend == "torch":
             return f"F.gelu({arg})"
         elif self.backend == "jax":
-            return f"jax.nn.gelu({arg})"
+            # jax.nn.gelu defaults to the tanh approximation; use the exact (erf)
+            # form so every backend computes the same function.
+            return f"jax.nn.gelu({arg}, approximate=False)"
         else:
             return f"(0.5 * {arg} * (1 + np.vectorize(math.erf)({arg} / np.sqrt(2))))"
 

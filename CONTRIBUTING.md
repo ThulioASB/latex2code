@@ -1,61 +1,39 @@
-# Contributing to latex2code
+# Contributing
 
-Thank you for considering contributing to `latex2code`! We welcome bug fixes, new LaTeX operator mappings, backend improvements, and documentation enhancements.
+Thanks for helping improve latex2code. Bug reports with a minimal LaTeX input, the backend you
+used, and the output you expected are the most useful contributions.
 
----
-
-## Development Setup
-
-1. Clone the repository and create a virtual environment:
-   ```bash
-   git clone https://github.com/ThulioASB/latex2code.git
-   cd latex2code
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   pip install -e ".[dev,torch,jax]"
-2. Make your changes in `src/latex2code/`. If you are adding a new LaTeX function or operator:
-
-- Register the SymPy expression node in `src/latex2code/parsing.py`.
-
-- Add backend mappings in `src/latex2code/backends.py`.
-
-- Define printer translation rules in `src/latex2code/printers.py`.
-
-- Add unit tests in `tests/test_core.py`.
-
-## Code Quality Checks
-Before submitting a Pull Request, ensure all linters, type checks, and tests pass locally:
+## Development setup
 
 ```bash
-# 1. Format code automatically
-python -m black src tests
-
-# 2. Check for lint errors (and auto-fix imports if needed)
-python -m ruff check --fix src tests
-
-# 3. Type check with mypy
-python -m mypy src
-
-# 4. Run the full test suite
-python -m pytest
+git clone https://github.com/ThulioASB/latex2code.git
+cd latex2code
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -e .
+pip install pytest hypothesis black
 ```
-## Commit Guidelines
-We recommend using clear, conventional commit messages:
 
-- `feat: add support for \operatorname{...}`
+The suite imports NumPy, SymPy, and Hypothesis. The PyTorch and JAX tests skip themselves when
+those frameworks are not installed; install them to run those tests:
 
-- `fix: resolve issue with piecewise evaluation`
+```bash
+pip install torch jax
+```
 
-- `docs: update README installation steps`
+## Running tests and formatting
 
-- `style: format imports and code with black/ruff`
+```bash
+pytest
+black src tests
+```
 
-## Pull Request Process
-1. Fork the repo and create your branch from `main`.
+## Guidelines
 
-2. Ensure all 4 check commands above pass cleanly.
-
-3. Open a PR with a description of your changes and reference any relevant issue.
-
-
----
+- Add a test with every behavior change. Transpilation tests should `exec` the generated source
+  and check values, not only match strings.
+- If you add a new function or LaTeX construct, add a printer for every backend, or make the
+  unsupported backends fail with `CodeGenerationError` rather than emitting wrong code.
+- Update `docs/` and `CHANGELOG.md` for user-visible changes.
+- Keep the scope focused: this is an expression transpiler, not a LaTeX document parser or a
+  computer algebra system.

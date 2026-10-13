@@ -13,7 +13,6 @@ from latex2code import (
     __version__,
     compile_latex,
     inspect_latex,
-    latex_to_code,
     transpile_latex,
 )
 from latex2code import api as api_module
@@ -28,34 +27,54 @@ from latex2code.core import (
 )
 
 
-def test_public_api_exposes_latex_to_code_helper():
-    code = latex_to_code(r"\frac{x}{y}")
-    assert "def formula(x: float, y: float) -> float:" in code
-    assert "return x/y" in code
-
-
-def test_latex_to_code_accepts_transpiler_options_and_symbol_maps():
-    code = latex_to_code(
-        r"\theta + \lambda",
-        function_name="model",
-        type_hints=False,
-        variable_map={"theta": "angle", "lambda": "lambda_value"},
-    )
-    assert "def model(" in code
-    assert "lambda_value" in code
-    assert "angle" in code
-    assert "return angle + lambda_value" in code
-
-
-def test_deprecated_python_api_aliases_warn():
-    with pytest.warns(DeprecationWarning, match="custom_symbol_map is deprecated"):
-        latex_to_code(
-            r"\lambda",
-            custom_symbol_map={r"\lambda": "weight"},
-            type_hints=False,
-        )
-    with pytest.warns(DeprecationWarning, match="use_numpy is deprecated"):
+def test_removed_legacy_arguments_are_rejected():
+    with pytest.raises(TypeError):
         transpile_latex("x", use_numpy=True)
+    with pytest.raises(TypeError):
+        compile_latex("x", use_numpy=True)
+    import latex2code
+
+    assert not hasattr(latex2code, "latex_to_code")
+
+
+def test_docstring_is_off_by_default():
+    code = transpile_latex(r"\frac{x}{y}", type_hints=False)
+    assert '"""' not in code
+
+
+def test_docstring_option_records_source_latex():
+    code = transpile_latex(r"\frac{x}{y}", type_hints=False, docstring=True)
+    scope = {}
+    exec(code, scope)
+    assert r"\frac{x}{y}" in scope["formula"].__doc__
+    assert scope["formula"](6, 3) == 2
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'a"""b',
+        'ends with quote"',
+        "ends with backslash\\",
+        "line1\nline2\\",
+        "tab\there",
+        "\x00nul",
+        "x\r\ny",
+        '""" ; import os ; os.system("echo pwn") ; """',
+        "\u2028x",
+        'x"""\n"""y',
+    ],
+)
+def test_docstring_literal_cannot_break_out_of_the_string(text):
+    import ast
+
+    source = "def f():\n    " + api_module._docstring_literal(text) + "\n    return 1\n"
+    function = ast.parse(source).body[0]
+    assert len(function.body) == 2
+    assert isinstance(function.body[0].value, ast.Constant)
+    scope = {}
+    exec(source, scope)
+    assert scope["f"]() == 1
 
 
 def test_simple_fraction():
@@ -298,7 +317,7 @@ def test_operatorname_expression_normalizes_surrounding_spacing_and_delimiters()
     assert math.isclose(compiled(x=0.5, y=2), math.erf(0.5) + 2)
 
 
-def test_latex_to_code_preserves_mathrm_contents():
+def test_mathrm_contents_are_preserved():
     compiled = compile_latex(r"\mathrm{e}^x", type_hints=False)
     assert math.isclose(compiled(x=2), math.e**2)
 
@@ -450,9 +469,6 @@ def test_framework_backend_source_and_annotations(backend, imports, annotation):
 def test_backend_rejects_unknown_and_conflicting_options():
     with pytest.raises(LaTeXTranspilerError, match="Unknown backend"):
         transpile_latex("x", backend="tensorflow")
-    with pytest.warns(DeprecationWarning):
-        with pytest.raises(LaTeXTranspilerError, match="conflicts"):
-            transpile_latex("x", backend="torch", use_numpy=True)
 
 
 @pytest.mark.parametrize("backend", ["torch", "jax"])
@@ -928,6 +944,12 @@ def test_limits_binomials_and_abs_are_supported():
     binomial_scope = {}
     exec(binomial_code, binomial_scope)
     assert binomial_scope["formula"](5, 2) == 10
+    # Exact for large integers (a gamma-function quotient would lose precision).
+    assert binomial_scope["formula"](60, 30) == math.comb(60, 30)
+    assert isinstance(binomial_scope["formula"](5, 2), int)
+    # Real-valued arguments still work through the gamma-function fallback.
+    assert math.isclose(binomial_scope["formula"](5.0, 2.0), 10.0)
+    assert math.isclose(binomial_scope["formula"](-0.5, 2), 0.375)
 
     abs_code = transpile_latex(r"\left|x\right|", type_hints=False)
     abs_scope = {}
@@ -1103,6 +1125,19 @@ def test_cli_rejects_removed_numpy_short_option(monkeypatch):
         cli_main()
 
     assert error.value.code == 2
+
+
+def test_cli_docstring_flag_embeds_latex(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["latex2code", r"\frac{a}{b}", "--no-types", "--docstring"],
+    )
+
+    cli_main()
+
+    output = capsys.readouterr().out
+    assert r"\frac{a}{b}" in output
+    compile(output, "<generated>", "exec")
 
 
 def test_cli_inspect_prints_json_report(monkeypatch, capsys):

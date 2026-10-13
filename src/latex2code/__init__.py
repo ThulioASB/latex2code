@@ -12,7 +12,6 @@ from latex2code.core import (
     UnsupportedLaTeXFeatureError,
     compile_latex,
     inspect_latex,
-    latex_to_code,
     transpile_latex,
 )
 
@@ -26,7 +25,6 @@ __all__ = [
     "transpile_latex",
     "compile_latex",
     "inspect_latex",
-    "latex_to_code",
     "CompiledFormula",
     "TranspilationInfo",
     "LaTeXTranspilerError",

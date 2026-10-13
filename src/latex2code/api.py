@@ -1,5 +1,4 @@
 import importlib.util
-import re
 import warnings
 from dataclasses import dataclass
 from typing import Callable, Mapping, Sequence
@@ -55,12 +54,29 @@ class CompiledFormula:
         return self.info.generated_code
 
 
+def _docstring_literal(latex_str: str) -> str:
+    """Return a Python string-literal statement that records the source LaTeX.
+
+    The LaTeX comes from the caller, so the literal must never be able to end
+    early or inject code. A raw triple-quoted string is used when that is
+    provably safe; anything unusual falls back to ``repr``, which always yields
+    a valid single-line literal.
+    """
+    text = latex_str.strip()
+    lines = text.splitlines() or [text]
+    body = "LaTeX source:\n" + "\n".join(f"        {line.rstrip()}" for line in lines)
+    plain = all(character.isprintable() or character in "\n\t" for character in body)
+    if plain and '"""' not in body and not body.endswith('"'):
+        return f'r"""{body}\n    """'
+    return repr("LaTeX source: " + " ".join(text.split()))
+
+
 def _transpile_latex(
     latex_str: str,
     *,
     function_name: str,
     type_hints: bool,
-    use_numpy: bool | None,
+    docstring: bool,
     backend: Backend | None,
     variable_map: Mapping[str, str] | None,
     args: Sequence[str] | None,
@@ -71,14 +87,8 @@ def _transpile_latex(
     if not latex_str or not latex_str.strip():
         raise LaTeXTranspilerError("LaTeX expression string cannot be empty.")
     _validate_python_identifier(function_name, "Function name")
-    if use_numpy is not None:
-        warnings.warn(
-            "use_numpy is deprecated; use backend='numpy' instead.",
-            DeprecationWarning,
-            stacklevel=warning_stacklevel,
-        )
     if backend is None:
-        backend = "numpy" if use_numpy else "python"
+        backend = "python"
     elif not isinstance(backend, str) or backend not in {
         "python",
         "numpy",
@@ -87,10 +97,6 @@ def _transpile_latex(
     }:
         raise LaTeXTranspilerError(
             f"Unknown backend {backend!r}; choose 'python', 'numpy', 'torch', or 'jax'."
-        )
-    if use_numpy and backend != "numpy":
-        raise LaTeXTranspilerError(
-            "use_numpy=True conflicts with an explicit backend; use backend='numpy' instead."
         )
     backend_spec = BACKENDS[backend]
     normalized_latex = _normalize_latex_string(latex_str)
@@ -299,6 +305,8 @@ def _transpile_latex(
 
     # 6. Construct and return complete source code
     code = f"{imports}def {function_name}({args_str}){return_hint}:\n"
+    if docstring:
+        code += f"    {_docstring_literal(latex_str)}\n"
     code += f"    return {python_expr_code}\n"
 
     return TranspilationInfo(
@@ -317,7 +325,7 @@ def transpile_latex(
     *,
     function_name: str = "formula",
     type_hints: bool = True,
-    use_numpy: bool | None = None,
+    docstring: bool = False,
     backend: Backend | None = None,
     variable_map: Mapping[str, str] | None = None,
     args: Sequence[str] | None = None,
@@ -329,7 +337,7 @@ def transpile_latex(
         latex_str,
         function_name=function_name,
         type_hints=type_hints,
-        use_numpy=use_numpy,
+        docstring=docstring,
         backend=backend,
         variable_map=variable_map,
         args=args,
@@ -343,7 +351,7 @@ def inspect_latex(
     *,
     function_name: str = "formula",
     type_hints: bool = True,
-    use_numpy: bool | None = None,
+    docstring: bool = False,
     backend: Backend | None = None,
     variable_map: Mapping[str, str] | None = None,
     args: Sequence[str] | None = None,
@@ -355,7 +363,7 @@ def inspect_latex(
         latex_str,
         function_name=function_name,
         type_hints=type_hints,
-        use_numpy=use_numpy,
+        docstring=docstring,
         backend=backend,
         variable_map=variable_map,
         args=args,
@@ -369,14 +377,14 @@ def compile_latex(
     *,
     function_name: str = "formula",
     type_hints: bool = True,
-    use_numpy: bool | None = None,
+    docstring: bool = False,
     backend: Backend | None = None,
     variable_map: Mapping[str, str] | None = None,
     args: Sequence[str] | None = None,
     constants: Mapping[str, object] | None = None,
 ) -> CompiledFormula:
     """Compile LaTeX into a callable and retain its generated source and metadata."""
-    selected_backend = backend or ("numpy" if use_numpy else "python")
+    selected_backend = backend or "python"
     if selected_backend == "torch" and importlib.util.find_spec("torch") is None:
         raise LaTeXTranspilerError(
             "The 'torch' backend requires the optional dependency 'torch'. "
@@ -391,7 +399,7 @@ def compile_latex(
         latex_str,
         function_name=function_name,
         type_hints=type_hints,
-        use_numpy=use_numpy,
+        docstring=docstring,
         backend=backend,
         variable_map=variable_map,
         args=args,
@@ -406,56 +414,3 @@ def compile_latex(
             f"Generated object {function_name!r} is not callable."
         )
     return CompiledFormula(info=info, function=function)
-
-
-def latex_to_code(
-    latex_str: str,
-    *,
-    custom_symbol_map: dict[str, str] | None = None,
-    function_name: str = "formula",
-    type_hints: bool = True,
-    use_numpy: bool | None = None,
-    backend: Backend | None = None,
-    variable_map: Mapping[str, str] | None = None,
-    args: Sequence[str] | None = None,
-    constants: Mapping[str, object] | None = None,
-) -> str:
-    """Convert LaTeX into executable Python code using the main transpile pipeline.
-
-    This helper preserves the historical `custom_symbol_map` behavior for macro
-    overrides while also accepting the same generation options as
-    :func:`transpile_latex`. Values are remapped via the standard variable map
-    after the LaTeX parser has interpreted the expression.
-    """
-    merged_variable_map = dict(variable_map) if variable_map is not None else {}
-
-    if custom_symbol_map is not None:
-        warnings.warn(
-            "custom_symbol_map is deprecated; use variable_map instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        for macro, python_var in custom_symbol_map.items():
-            if not isinstance(macro, str) or not macro.startswith("\\"):
-                raise LaTeXTranspilerError(
-                    "custom_symbol_map keys must be LaTeX command strings like '\\lambda'."
-                )
-            symbol_name = macro.lstrip("\\")
-            if not re.fullmatch(r"[A-Za-z]+", symbol_name):
-                raise LaTeXTranspilerError(
-                    "custom_symbol_map supports plain LaTeX symbol commands such as '\\lambda'; "
-                    f"received {macro!r}."
-                )
-            merged_variable_map[symbol_name] = python_var
-
-    return transpile_latex(
-        latex_str,
-        function_name=function_name,
-        type_hints=type_hints,
-        use_numpy=use_numpy,
-        backend=backend,
-        variable_map=merged_variable_map or None,
-        args=args,
-        constants=constants,
-        _warning_stacklevel=4,
-    )

@@ -41,6 +41,11 @@ def main():
         help="Disable type hints in the generated function definition",
     )
     parser.add_argument(
+        "--docstring",
+        action="store_true",
+        help="Embed the source LaTeX in the generated function's docstring",
+    )
+    parser.add_argument(
         "--backend",
         choices=("python", "numpy", "torch", "jax"),
         help="Generated code target (default: python)",
@@ -95,6 +100,7 @@ def main():
         _run_interactive(
             function_name=args.name,
             type_hints=not args.no_types,
+            docstring=args.docstring,
             backend=args.backend,
             inspect=args.inspect,
             variable_map=variable_map,
@@ -110,6 +116,7 @@ def main():
                 latex_input,
                 function_name=args.name,
                 type_hints=not args.no_types,
+                docstring=args.docstring,
                 backend=args.backend,
                 variable_map=variable_map,
             )
@@ -119,6 +126,7 @@ def main():
                 latex_input,
                 function_name=args.name,
                 type_hints=not args.no_types,
+                docstring=args.docstring,
                 backend=args.backend,
                 variable_map=variable_map,
             )
@@ -142,6 +150,7 @@ def _run_interactive(
     *,
     function_name: str,
     type_hints: bool,
+    docstring: bool,
     backend: Backend | None,
     inspect: bool,
     variable_map: dict[str, str],
@@ -166,6 +175,7 @@ def _run_interactive(
                     "\n".join(multiline),
                     function_name=function_name,
                     type_hints=type_hints,
+                    docstring=docstring,
                     backend=backend,
                     inspect=inspect,
                     variable_map=variable_map,
@@ -188,6 +198,7 @@ def _run_interactive(
             expression,
             function_name=function_name,
             type_hints=type_hints,
+            docstring=docstring,
             backend=backend,
             inspect=inspect,
             variable_map=variable_map,
@@ -199,6 +210,7 @@ def _print_interactive_expression(
     *,
     function_name: str,
     type_hints: bool,
+    docstring: bool,
     backend: Backend | None,
     inspect: bool,
     variable_map: dict[str, str],
@@ -209,6 +221,7 @@ def _print_interactive_expression(
                 expression,
                 function_name=function_name,
                 type_hints=type_hints,
+                docstring=docstring,
                 backend=backend,
                 variable_map=variable_map,
             )
@@ -218,6 +231,7 @@ def _print_interactive_expression(
                 expression,
                 function_name=function_name,
                 type_hints=type_hints,
+                docstring=docstring,
                 backend=backend,
                 variable_map=variable_map,
             )

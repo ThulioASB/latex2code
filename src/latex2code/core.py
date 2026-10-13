@@ -3,7 +3,6 @@ from .api import (
     TranspilationInfo,
     compile_latex,
     inspect_latex,
-    latex_to_code,
     transpile_latex,
 )
 from .backends import Backend
@@ -31,5 +30,4 @@ __all__ = [
     "transpile_latex",
     "compile_latex",
     "inspect_latex",
-    "latex_to_code",
 ]

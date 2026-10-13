@@ -16,7 +16,6 @@ from .errors import (
 from .normalize import VALID_LATEX_COMMANDS, _normalize_latex_string
 
 _LATEX_PARSE_ERRORS = (LaTeXParsingError,)
-_LATEX_PARSE_ERRORS = (LaTeXParsingError,)
 
 
 class _StableSigmoid(sp.Function):
