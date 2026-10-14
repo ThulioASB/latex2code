@@ -166,7 +166,7 @@ or `exec` output derived from LaTeX you do not trust.
 - [docs/backends.md](docs/backends.md): what each backend supports and where semantics differ
 - [docs/limitations.md](docs/limitations.md): supported scope and known limitations
 - [examples/basic_usage.py](examples/basic_usage.py): a runnable tour
-- [CHANGELOG.md](CHANGELOG.md) and [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## License
 
