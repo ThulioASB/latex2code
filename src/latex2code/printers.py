@@ -126,7 +126,7 @@ class _FrameworkPrinter(NumPyPrinter):
                 f"* torch.exp(torch.lgamma({value}))"
             )
         if self.backend == "numpy":
-            return f"np.vectorize(math.gamma)({value})"
+            return f"np.vectorize(math.gamma, otypes=[float])({value})"
         return f"jax.scipy.special.gamma({value})"
 
     def _print__StableSigmoid(self, expr: _StableSigmoid) -> str:
@@ -152,9 +152,9 @@ class _FrameworkPrinter(NumPyPrinter):
         total = f"({first} + {second})"
         if self.backend == "numpy":
             log_magnitude = (
-                f"np.vectorize(math.lgamma)({first})"
-                f" + np.vectorize(math.lgamma)({second})"
-                f" - np.vectorize(math.lgamma)({total})"
+                f"np.vectorize(math.lgamma, otypes=[float])({first})"
+                f" + np.vectorize(math.lgamma, otypes=[float])({second})"
+                f" - np.vectorize(math.lgamma, otypes=[float])({total})"
             )
             sign = (
                 f"np.where({first} < 0, np.sign(np.sin(np.pi * {first})), 1)"
@@ -213,7 +213,7 @@ class _FrameworkPrinter(NumPyPrinter):
             # form so every backend computes the same function.
             return f"jax.nn.gelu({arg}, approximate=False)"
         else:
-            return f"(0.5 * {arg} * (1 + np.vectorize(math.erf)({arg} / np.sqrt(2))))"
+            return f"(0.5 * {arg} * (1 + np.vectorize(math.erf, otypes=[float])({arg} / np.sqrt(2))))"
 
     def _print__StableSilu(self, expr: sp.Expr) -> str:
         arg = self.doprint(expr.args[0])
