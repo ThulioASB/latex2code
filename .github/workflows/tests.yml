@@ -20,6 +20,7 @@ jobs:
   # so run them once instead of in every matrix cell.
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
 
@@ -27,6 +28,8 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: "3.12"
+        cache: pip
+        cache-dependency-path: pyproject.toml
 
     - name: Install dependencies
       run: |
@@ -44,11 +47,14 @@ jobs:
   # Full suite with both optional frameworks installed.
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
+        cache: pip
+        cache-dependency-path: pyproject.toml
 
     steps:
     - uses: actions/checkout@v4
@@ -57,6 +63,8 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+        cache: pip
+        cache-dependency-path: pyproject.toml
 
     - name: Install dependencies
       run: |
@@ -72,6 +80,7 @@ jobs:
   # else may quietly depend on them.
   no-frameworks:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
 
@@ -79,6 +88,8 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: "3.12"
+        cache: pip
+        cache-dependency-path: pyproject.toml
 
     - name: Install project and test dependencies only
       run: |
@@ -92,10 +103,13 @@ jobs:
   # tools, no torch/jax (which would pull in SciPy). Generated code must run.
   minimal-install:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.10", "3.13"]
+        cache: pip
+        cache-dependency-path: pyproject.toml
     steps:
     - uses: actions/checkout@v4
 
@@ -103,6 +117,8 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+        cache: pip
+        cache-dependency-path: pyproject.toml
 
     - name: Install the package with runtime dependencies only
       run: |
@@ -114,6 +130,7 @@ jobs:
       run: |
         latex2code --version
         latex2code '\frac{a}{b}' --name divide
+        latex2code 'x + w' --args w,x --no-types | grep -q 'def formula(w, x):'
         python - <<'EOF'
         import importlib.util
 
@@ -133,6 +150,9 @@ jobs:
         expected = np.exp(values - values.max())
         assert np.allclose(softmax(values), expected / expected.sum())
 
+        silu = compile_latex(r"\operatorname{silu}(x)")
+        assert abs(silu(-1000.0)) < 1e-12  # must not raise OverflowError
+
         ratio = compile_latex(r"\frac{x}{y}")
         assert ratio(6, 3) == 2
 
@@ -144,14 +164,28 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
         python-version: "3.12"
+        cache: pip
+        cache-dependency-path: pyproject.toml
     - name: Build source distribution and wheel
       run: |
         python -m pip install --upgrade pip build twine
         python -m build
         python -m twine check dist/*
+    - name: Install the wheel in a clean environment
+      run: |
+        python -m venv /tmp/wheel-test
+        /tmp/wheel-test/bin/pip install dist/*.whl
+        /tmp/wheel-test/bin/latex2code --version
+        /tmp/wheel-test/bin/python - <<'EOF'
+        from importlib.resources import files
+
+        assert files("latex2code").joinpath("py.typed").is_file(), "py.typed missing"
+        print("wheel OK")
+        EOF

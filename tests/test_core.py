@@ -1646,9 +1646,9 @@ def test_python_softmax_subtracts_the_maximum():
 
 def test_python_softmax_does_not_capture_a_variable_named_i():
     softmax = compile_latex(r"\operatorname{softmax}(i)", type_hints=False)
-    assert softmax([1.0, 2.0, 3.0]) == pytest.approx(
-        [math.exp(v) / sum(math.exp(w) for w in (1.0, 2.0, 3.0)) for v in (1.0, 2.0, 3.0)]
-    )
+    values = [1.0, 2.0, 3.0]
+    total = sum(math.exp(v) for v in values)
+    assert softmax(values) == pytest.approx([math.exp(v) / total for v in values])
 
 
 def test_torch_output_does_not_reserve_the_name_F():
