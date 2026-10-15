@@ -200,7 +200,10 @@ def main():
         print(f"\n[Error] {err}", file=sys.stderr)
         sys.exit(1)
     except SyntaxError as err:
-        print(f"\n[Error] Generated Python failed syntax validation: {err}", file=sys.stderr)
+        print(
+            f"\n[Error] Generated Python failed syntax validation: {err}",
+            file=sys.stderr,
+        )
         sys.exit(1)
     except OSError as err:
         print(f"\n[Error] Could not write output: {err}", file=sys.stderr)
