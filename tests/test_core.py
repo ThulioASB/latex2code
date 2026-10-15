@@ -1685,6 +1685,7 @@ def test_cli_args_must_list_every_variable(monkeypatch, capsys):
     assert excinfo.value.code == 1
     assert "args must contain every expression variable" in capsys.readouterr().err
 
+
 @pytest.mark.parametrize("expression", ["erf(x)", "erfc(x)", "gamma(x)", "gelu(x)"])
 def test_numpy_scalar_wrappers_support_empty_arrays(expression):
     """NumPy's vectorize needs an explicit output type for empty inputs."""
@@ -1693,3 +1694,12 @@ def test_numpy_scalar_wrappers_support_empty_arrays(expression):
     assert isinstance(result, np.ndarray)
     assert result.shape == (0,)
 
+
+@pytest.mark.parametrize("expression", ["beta(x, y)", "beta(x, 2)"])
+def test_numpy_beta_supports_empty_arrays(expression):
+    """The log-gamma implementation must not infer types from empty arrays."""
+    compiled = compile_latex(expression, backend="numpy", type_hints=False)
+    kwargs = {"y": np.asarray([], dtype=float)} if "y" in expression else {}
+    result = compiled(np.asarray([], dtype=float), **kwargs)
+    assert isinstance(result, np.ndarray)
+    assert result.shape == (0,)
