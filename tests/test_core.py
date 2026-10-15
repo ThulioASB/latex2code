@@ -28,6 +28,13 @@ from latex2code.core import (
 )
 
 
+@pytest.mark.parametrize("api", [transpile_latex, inspect_latex, compile_latex])
+@pytest.mark.parametrize("value", [None, 123, b"x", ["x"]])
+def test_public_apis_reject_non_string_latex_with_clear_error(api, value):
+    with pytest.raises(LaTeXTranspilerError, match="LaTeX expression must be a string"):
+        api(value)
+
+
 def test_removed_legacy_arguments_are_rejected():
     with pytest.raises(TypeError):
         transpile_latex("x", use_numpy=True)

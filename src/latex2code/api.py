@@ -84,7 +84,11 @@ def _transpile_latex(
     warning_stacklevel: int,
 ) -> TranspilationInfo:
     """Build generated source and inspection details from a LaTeX expression."""
-    if not latex_str or not latex_str.strip():
+    if not isinstance(latex_str, str):
+        raise LaTeXTranspilerError(
+            f"LaTeX expression must be a string, got {type(latex_str).__name__}."
+        )
+    if not latex_str.strip():
         raise LaTeXTranspilerError("LaTeX expression string cannot be empty.")
     _validate_python_identifier(function_name, "Function name")
     if backend is None:
