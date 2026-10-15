@@ -6,11 +6,33 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code Style: Black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-A lightweight Python library and CLI that transpiles a supported subset of LaTeX math into
-readable, standalone Python functions, for plain Python, NumPy, PyTorch, or JAX.
+### Transform LaTeX mathematical expressions into Python code.
 
-Aimed at researchers and engineers who want to get from a formula in a paper to executable code
-they can inspect, test, and commit.
+latex2code is a Python tool designed to bridge the gap between mathematical notation and executable code. It converts LaTeX expressions into Python-compatible representations, helping developers and researchers integrate mathematical formulas into their workflows.
+
+## Highlights
+
+- LaTeX-to-Python conversion — translate mathematical expressions into executable Python code.
+
+- Multiple numerical backends — work with supported numerical libraries for scientific computing and machine learning.
+
+- Command-line interface — convert expressions directly from your terminal.
+
+- Syntax validation — check generated Python code before using it.
+
+- Developer-friendly workflow — automated tests and clear documentation to support reliable development.
+
+## Who is it for?
+
+latex2code is intended for developers, researchers, students, and anyone who wants to bring mathematical expressions into Python-based applications.
+
+## Goals
+
+The project's goal is to make mathematical code generation more accessible, predictable, and maintainable, while continuously improving expression parsing, generated code quality, and numerical correctness.
+
+---
+
+<br>
 
 ```python
 from latex2code import transpile_latex
