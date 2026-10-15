@@ -123,6 +123,7 @@ latex2code '\sin(x)^2 + x' --backend torch --output differentiable.py
 latex2code '\theta + x' --map-variable theta=angle
 latex2code 'w x + b' --args x,w,b
 latex2code '\frac{a}{b}' --docstring
+latex2code '\sin(x)^2 + x' --check
 latex2code '\sin(\pi x) + \theta' --inspect
 latex2code --interactive
 ```
@@ -135,6 +136,7 @@ latex2code --interactive
 |  | `--backend` | `python`, `numpy`, `torch`, or `jax` (default: `python`). |
 | `-o` | `--output` | Write the source to a file instead of stdout. |
 |  | `--inspect` | Print a JSON report (parsed expression, variables, warnings, source). |
+|  | `--check` | Validate generated Python syntax without printing the generated code. |
 |  | `--map-variable SYMBOL=NAME` | Rename a parsed variable; repeatable. |
 |  | `--args NAMES` | Comma-separated argument order, using parsed symbol names. |
 | `-i` | `--interactive` | Read expressions until `quit`, `exit`, or end-of-file. |

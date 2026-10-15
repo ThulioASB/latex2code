@@ -1,6 +1,9 @@
 import argparse
+import ast
 import json
+import os
 import sys
+import tempfile
 from dataclasses import asdict
 from pathlib import Path
 
@@ -11,6 +14,30 @@ from latex2code.core import (
     inspect_latex,
     transpile_latex,
 )
+
+
+def _write_text_atomically(path: Path, content: str) -> None:
+    """Write a file atomically so a failed write cannot truncate existing output."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary_file:
+            temporary_path = Path(temporary_file.name)
+            temporary_file.write(content)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        if temporary_path is not None and temporary_path.exists():
+            temporary_path.unlink()
 
 
 def main():
@@ -57,6 +84,11 @@ def main():
         help="Write generated Python source to this file instead of stdout",
     )
     parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Validate that generated output is syntactically valid Python without printing it",
+    )
+    parser.add_argument(
         "--inspect",
         action="store_true",
         help="Print a JSON report with the parsed expression, variables, warnings, and code",
@@ -88,6 +120,10 @@ def main():
         parser.error("--interactive cannot be combined with a positional expression")
     if args.inspect and args.output:
         parser.error("--inspect cannot be combined with --output")
+    if args.check and (args.inspect or args.output):
+        parser.error("--check cannot be combined with --inspect or --output")
+    if args.check and args.interactive:
+        parser.error("--check cannot be combined with --interactive")
     if args.interactive and args.output:
         parser.error("--interactive cannot be combined with --output")
 
@@ -123,7 +159,19 @@ def main():
         latex_input = sys.stdin.read().strip()
 
     try:
-        if args.inspect:
+        if args.check:
+            source = transpile_latex(
+                latex_input,
+                function_name=args.name,
+                type_hints=not args.no_types,
+                docstring=args.docstring,
+                backend=args.backend,
+                variable_map=variable_map,
+                args=argument_order,
+            )
+            ast.parse(source, filename="<latex2code-generated>")
+            print("Generated Python syntax is valid.")
+        elif args.inspect:
             details = inspect_latex(
                 latex_input,
                 function_name=args.name,
@@ -145,12 +193,14 @@ def main():
                 args=argument_order,
             )
             if args.output:
-                args.output.parent.mkdir(parents=True, exist_ok=True)
-                args.output.write_text(source, encoding="utf-8")
+                _write_text_atomically(args.output, source)
             else:
                 print(source)
     except LaTeXTranspilerError as err:
         print(f"\n[Error] {err}", file=sys.stderr)
+        sys.exit(1)
+    except SyntaxError as err:
+        print(f"\n[Error] Generated Python failed syntax validation: {err}", file=sys.stderr)
         sys.exit(1)
     except OSError as err:
         print(f"\n[Error] Could not write output: {err}", file=sys.stderr)

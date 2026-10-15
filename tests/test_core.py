@@ -1198,6 +1198,49 @@ def test_cli_docstring_flag_embeds_latex(monkeypatch, capsys):
     compile(output, "<generated>", "exec")
 
 
+def test_cli_check_rejects_interactive_mode(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["latex2code", "--check", "--interactive"])
+
+    with pytest.raises(SystemExit) as error:
+        cli_main()
+
+    assert error.value.code == 2
+
+
+def test_atomic_output_writer_replaces_file_and_leaves_no_temporary_files(tmp_path):
+    from latex2code.cli import _write_text_atomically
+
+    output_file = tmp_path / "nested" / "generated.py"
+    output_file.parent.mkdir()
+    output_file.write_text("old content", encoding="utf-8")
+
+    _write_text_atomically(output_file, "def formula():\n    return 42\n")
+
+    assert output_file.read_text(encoding="utf-8") == "def formula():\n    return 42\n"
+    assert list(output_file.parent.iterdir()) == [output_file]
+
+
+def test_cli_check_validates_without_emitting_generated_source(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["latex2code", r"\frac{x}{2}", "--check"])
+
+    cli_main()
+
+    captured = capsys.readouterr()
+    assert captured.out == "Generated Python syntax is valid.\n"
+    assert captured.err == ""
+
+
+def test_cli_check_rejects_output_and_inspect_combinations(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv", ["latex2code", "x", "--check", "--output", "generated.py"]
+    )
+
+    with pytest.raises(SystemExit) as error:
+        cli_main()
+
+    assert error.value.code == 2
+
+
 def test_cli_inspect_prints_json_report(monkeypatch, capsys):
     monkeypatch.setattr(
         "sys.argv",
