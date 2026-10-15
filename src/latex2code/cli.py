@@ -68,6 +68,11 @@ def main():
         help="Rename a parsed variable to a Python argument name (repeatable)",
     )
     parser.add_argument(
+        "--args",
+        metavar="NAMES",
+        help="Comma-separated argument order using parsed symbol names, e.g. x,w,b",
+    )
+    parser.add_argument(
         "-i",
         "--interactive",
         action="store_true",
@@ -95,6 +100,12 @@ def main():
             parser.error(f"variable {symbol!r} was mapped more than once")
         variable_map[symbol] = name
 
+    argument_order = None
+    if args.args is not None:
+        argument_order = [name.strip() for name in args.args.split(",") if name.strip()]
+        if not argument_order:
+            parser.error("--args needs at least one name, e.g. --args x,y")
+
     latex_input = args.latex
     if args.interactive:
         _run_interactive(
@@ -104,6 +115,7 @@ def main():
             backend=args.backend,
             inspect=args.inspect,
             variable_map=variable_map,
+            argument_order=argument_order,
         )
         return
 
@@ -119,6 +131,7 @@ def main():
                 docstring=args.docstring,
                 backend=args.backend,
                 variable_map=variable_map,
+                args=argument_order,
             )
             print(json.dumps(asdict(details), indent=2))
         else:
@@ -129,6 +142,7 @@ def main():
                 docstring=args.docstring,
                 backend=args.backend,
                 variable_map=variable_map,
+                args=argument_order,
             )
             if args.output:
                 args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -154,6 +168,7 @@ def _run_interactive(
     backend: Backend | None,
     inspect: bool,
     variable_map: dict[str, str],
+    argument_order: list[str] | None = None,
 ) -> None:
     mode = "inspection" if inspect else "code generation"
     print(
@@ -179,6 +194,7 @@ def _run_interactive(
                     backend=backend,
                     inspect=inspect,
                     variable_map=variable_map,
+                    argument_order=argument_order,
                 )
                 multiline = None
             elif expression == ":cancel":
@@ -202,6 +218,7 @@ def _run_interactive(
             backend=backend,
             inspect=inspect,
             variable_map=variable_map,
+            argument_order=argument_order,
         )
 
 
@@ -214,6 +231,7 @@ def _print_interactive_expression(
     backend: Backend | None,
     inspect: bool,
     variable_map: dict[str, str],
+    argument_order: list[str] | None = None,
 ) -> None:
     try:
         if inspect:
@@ -224,6 +242,7 @@ def _print_interactive_expression(
                 docstring=docstring,
                 backend=backend,
                 variable_map=variable_map,
+                args=argument_order,
             )
             print(json.dumps(asdict(details), indent=2))
         else:
@@ -234,6 +253,7 @@ def _print_interactive_expression(
                 docstring=docstring,
                 backend=backend,
                 variable_map=variable_map,
+                args=argument_order,
             )
             print(source, end="" if source.endswith("\n") else "\n")
     except LaTeXTranspilerError as err:

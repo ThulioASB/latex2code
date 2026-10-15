@@ -161,10 +161,11 @@ print(
 Supported: `sigmoid`, `relu`, `softplus`, `softmax`, `gelu`, `silu`, `logit`, `softsign`,
 `swish`.
 
-Named `sigmoid`, `softplus`, and `swish` operators use numerically stable scalar or
-framework-native implementations. Writing an equivalent expanded formula by hand (such as
-`log(1 + exp(x))`) does not get that stabilization. `softmax`, `gelu`, and `silu` are
-generated from their standard definitions; see [backends.md](backends.md) for the details per
+Named `sigmoid`, `softplus`, `swish`, and `silu` operators use numerically stable scalar or
+framework-native implementations, and `softmax` subtracts the maximum on the Python and NumPy
+backends. Writing an equivalent expanded formula by hand (such as
+`log(1 + exp(x))`) does not get that stabilization. `gelu` is generated from its
+exact definition; see [backends.md](backends.md) for the details per
 backend. Check input domains for `logit`, logarithms, and roots: the transpiler does not
 silently clip inputs.
 

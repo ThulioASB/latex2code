@@ -28,17 +28,18 @@ Generated NumPy code needs only NumPy; SciPy is not required.
 | Operator | Python | NumPy | PyTorch | JAX |
 | --- | --- | --- | --- | --- |
 | `sigmoid` | `0.5 * (1 + tanh(x / 2))` (stable) | `exp(-logaddexp(0, -x))` (stable) | `torch.sigmoid` | `jax.nn.sigmoid` |
-| `softplus` | `max(x, 0) + log1p(exp(-abs(x)))` (stable) | `logaddexp(0, x)` (stable) | `F.softplus` | `jax.nn.softplus` |
+| `softplus` | `max(x, 0) + log1p(exp(-abs(x)))` (stable) | `logaddexp(0, x)` (stable) | `torch.nn.functional.softplus` | `jax.nn.softplus` |
 | `swish` | `x * sigmoid(x)` | `x * sigmoid(x)` | `x * sigmoid(x)` | `x * sigmoid(x)` |
-| `silu` | `x / (1 + exp(-x))` | `x / (1 + exp(-x))` | `F.silu` | `jax.nn.silu` |
-| `gelu` | exact (`erf`) form | exact (`erf`) form | `F.gelu` (exact) | `jax.nn.gelu(approximate=False)` (exact) |
-| `softmax` | list comprehension over the input; no max-subtraction | pure-NumPy, max-subtracted (stable); normalizes over all elements, like `scipy.special.softmax` with its default | `F.softmax(dim=-1)` | `jax.nn.softmax` (last axis) |
+| `silu` | `x * sigmoid(x)` (stable) | `x * sigmoid(x)` (stable) | `torch.nn.functional.silu` | `jax.nn.silu` |
+| `gelu` | exact (`erf`) form | exact (`erf`) form | `torch.nn.functional.gelu` (exact) | `jax.nn.gelu(approximate=False)` (exact) |
+| `softmax` | list comprehension over the input, max-subtracted (stable); normalizes over the whole sequence | pure-NumPy, max-subtracted (stable); normalizes over all elements, like `scipy.special.softmax` with its default | `torch.nn.functional.softmax(dim=-1)` | `jax.nn.softmax` (last axis) |
 | `relu`, `logit`, `softsign` | built from elementary operations (`max`, `log`, `abs`) | same, with `np.maximum` | same, with `torch.maximum` | same, with `jnp.maximum` |
 
 Notes:
 
-- Only `sigmoid`, `softplus`, and `swish` are documented as numerically stable. The Python
-  backend's `softmax` is the textbook formula and can overflow for large inputs; use the
+- `sigmoid`, `softplus`, `swish`, and `silu` are generated in overflow-free forms on the Python
+  and NumPy backends, and `softmax` subtracts the maximum there too. `gelu` uses the exact
+  `erf` form. The Python `softmax` iterates over a plain sequence in pure Python, so use the
   NumPy, PyTorch, or JAX backend for real workloads.
 - `softmax` normalization axis differs by backend (see the table). If your formula depends on
   a specific axis, check it with `inspect_latex`.

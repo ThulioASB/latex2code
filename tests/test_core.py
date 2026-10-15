@@ -1621,3 +1621,59 @@ def test_cli_supports_framework_backends_with_output_file(
     expected_import = "import torch" if backend == "torch" else "import jax"
     assert expected_import in content
     assert "def formula(" in content
+
+
+def test_python_silu_does_not_overflow_for_large_negative_input():
+    silu = compile_latex(r"\operatorname{silu}(x)", type_hints=False)
+    assert silu(-1000.0) == pytest.approx(0.0, abs=1e-12)
+    assert silu(2.0) == pytest.approx(2.0 / (1.0 + math.exp(-2.0)))
+
+
+def test_numpy_silu_is_stable_for_large_negative_input():
+    silu = compile_latex(r"\operatorname{silu}(x)", backend="numpy")
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = silu(np.array([-1000.0, 0.0, 2.0]))
+    assert np.allclose(result, [0.0, 0.0, 2.0 / (1.0 + math.exp(-2.0))])
+
+
+def test_python_softmax_subtracts_the_maximum():
+    softmax = compile_latex(r"\operatorname{softmax}(x)", type_hints=False)
+    result = softmax([1000.0, 1001.0])
+    assert sum(result) == pytest.approx(1.0)
+    assert result[1] == pytest.approx(1 / (1 + math.exp(-1)))
+
+
+def test_python_softmax_does_not_capture_a_variable_named_i():
+    softmax = compile_latex(r"\operatorname{softmax}(i)", type_hints=False)
+    assert softmax([1.0, 2.0, 3.0]) == pytest.approx(
+        [math.exp(v) / sum(math.exp(w) for w in (1.0, 2.0, 3.0)) for v in (1.0, 2.0, 3.0)]
+    )
+
+
+def test_torch_output_does_not_reserve_the_name_F():
+    code = transpile_latex(r"\operatorname{gelu}(F)", backend="torch")
+    assert "as F" not in code
+    assert "torch.nn.functional.gelu(F)" in code
+    compile(code, "<generated>", "exec")
+
+
+def test_cli_args_sets_argument_order(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["latex2code", r"x + w", "--args", "w,x", "--no-types"],
+    )
+
+    cli_main()
+
+    assert "def formula(w, x):" in capsys.readouterr().out
+
+
+def test_cli_args_must_list_every_variable(monkeypatch, capsys):
+    monkeypatch.setattr("sys.argv", ["latex2code", r"x + w", "--args", "x"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli_main()
+
+    assert excinfo.value.code == 1
+    assert "args must contain every expression variable" in capsys.readouterr().err

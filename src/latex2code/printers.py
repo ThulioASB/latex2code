@@ -71,14 +71,22 @@ class _PythonPrinter(PythonCodePrinter):
         return f"(0.5 * {arg} * (1 + math.erf({arg} / math.sqrt(2))))"
 
     def _print__StableSilu(self, expr: sp.Expr) -> str:
-        self.module_imports["math"].add("exp")
-        arg = self.doprint(expr.args[0])
-        return f"({arg} / (1 + math.exp(-({arg}))))"
+        # silu(x) = x * sigmoid(x); the tanh form of sigmoid cannot overflow,
+        # unlike x / (1 + exp(-x)), which raises OverflowError for x < -709.
+        value = self._print(expr.args[0])
+        sigmoid = self._print(_StableSigmoid(expr.args[0]))
+        return f"(({value}) * {sigmoid})"
 
     def _print__StableSoftmax(self, expr: sp.Expr) -> str:
         self.module_imports["math"].add("exp")
-        arg = self.doprint(expr.args[0])
-        return f"[math.exp(i) / sum(math.exp(j) for j in {arg}) for i in {arg}]"
+        arg = self._print(expr.args[0])
+        # Underscore-prefixed lambda parameters keep a user variable such as `i`
+        # or `j` from being captured; subtracting the maximum avoids overflow.
+        return (
+            "(lambda _z: (lambda _m: (lambda _e: (lambda _s: [_v / _s for _v in _e])"
+            "(sum(_e)))([math.exp(_v - _m) for _v in _z]))(max(_z)))"
+            f"({arg})"
+        )
 
 
 class _FrameworkPrinter(NumPyPrinter):
@@ -199,7 +207,7 @@ class _FrameworkPrinter(NumPyPrinter):
     def _print__StableGelu(self, expr: sp.Expr) -> str:
         arg = self.doprint(expr.args[0])
         if self.backend == "torch":
-            return f"F.gelu({arg})"
+            return f"torch.nn.functional.gelu({arg})"
         elif self.backend == "jax":
             # jax.nn.gelu defaults to the tanh approximation; use the exact (erf)
             # form so every backend computes the same function.
@@ -210,16 +218,16 @@ class _FrameworkPrinter(NumPyPrinter):
     def _print__StableSilu(self, expr: sp.Expr) -> str:
         arg = self.doprint(expr.args[0])
         if self.backend == "torch":
-            return f"F.silu({arg})"
+            return f"torch.nn.functional.silu({arg})"
         elif self.backend == "jax":
             return f"jax.nn.silu({arg})"
         else:
-            return f"({arg} / (1 + np.exp(-({arg}))))"
+            return f"(({arg}) * {self._print(_StableSigmoid(expr.args[0]))})"
 
     def _print__StableSoftmax(self, expr: sp.Expr) -> str:
         arg = self.doprint(expr.args[0])
         if self.backend == "torch":
-            return f"F.softmax({arg}, dim=-1)"
+            return f"torch.nn.functional.softmax({arg}, dim=-1)"
         elif self.backend == "jax":
             return f"jax.nn.softmax({arg})"
         else:
